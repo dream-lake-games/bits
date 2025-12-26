@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use bits::prelude::*;
-use lightyear::prelude::{Connected, LinkOf, ReplicationSender};
+use lightyear::prelude::*;
 
 use crate::server_state::ServerState;
 
@@ -8,28 +8,25 @@ use crate::server_state::ServerState;
 struct LobbyCleanup;
 
 fn on_enter_lobby(mut commands: Commands) {
-    let container = Node {
-        width: Val::Percent(100.0),
-        height: Val::Percent(100.0),
-        align_items: AlignItems::Center,
-        justify_content: JustifyContent::Center,
-        ..default()
-    };
-
     commands.spawn((
-        container,
+        FlexSimple::new().bundle(),
         LobbyCleanup,
         children![
+            TextSimple::h1("")
+                .with_text_system(
+                    |connected_q: Query<Entity, (With<LinkOf>, With<Connected>)>| {
+                        let num_connected = connected_q.iter().count();
+                        format!("Connected: {} / 2", num_connected)
+                    }
+                )
+                .bundle(),
+            Spacer::height(Val::Px(20.0)).bundle(),
             ButtonSimple::new("START")
                 .with_on_release(|commands| {
                     commands.run_system_cached(start_game);
                 })
                 .with_disabled_system(
                     |connected_q: Query<Entity, (With<LinkOf>, With<Connected>)>| {
-                        info!(
-                            "mork - seeing {} connected clients",
-                            connected_q.iter().count()
-                        );
                         connected_q.iter().count() < 2
                     }
                 )
@@ -44,8 +41,8 @@ fn on_exit_lobby(cleanup_q: Query<Entity, With<LobbyCleanup>>, mut commands: Com
     }
 }
 
-fn start_game() {
-    println!("Game starting!");
+fn start_game(mut next_server_state: ResMut<NextState<ServerState>>) {
+    next_server_state.set(ServerState::InGame);
 }
 
 pub fn server_lobby_plugin_fn(app: &mut App) {

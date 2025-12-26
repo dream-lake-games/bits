@@ -69,3 +69,4 @@ pub fn server_simple_plugin_fn(app: &mut App) {
     app.add_observer(handle_server_started);
     app.add_observer(handle_new_client);
 }
+

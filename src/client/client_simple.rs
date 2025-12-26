@@ -53,3 +53,4 @@ pub fn client_simple_plugin_fn(app: &mut App) {
     app.add_plugins(ClientPlugins::default());
     app.add_systems(Startup, simple_client_startup);
 }
+

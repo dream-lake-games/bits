@@ -18,7 +18,7 @@ impl Default for ButtonSimpleDrawState {
 }
 
 #[derive(Component)]
-#[require(Button, BackgroundColor, BorderColor)]
+#[require(Button, BackgroundColor, BorderColor, Name)]
 pub struct ButtonSimple {
     text: String,
     font_size: f32,
@@ -38,12 +38,51 @@ pub struct ButtonSimple {
 
 impl ButtonSimple {
     pub fn new(text: impl Into<String>) -> Self {
+        Self::medium(text)
+    }
+
+    pub fn medium(text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
             font_size: 40.0,
             width: Val::Px(150.0),
             height: Val::Px(65.0),
             border_width: Val::Px(5.0),
+            standard_draw: ButtonSimpleDrawState {
+                bg: Color::srgb(0.15, 0.15, 0.15),
+                border: Color::BLACK,
+                text_color: Color::srgb(0.9, 0.9, 0.9),
+            },
+            hover_draw: ButtonSimpleDrawState {
+                bg: Color::srgb(0.25, 0.25, 0.25),
+                border: Color::WHITE,
+                text_color: Color::srgb(1.0, 1.0, 1.0),
+            },
+            press_draw: ButtonSimpleDrawState {
+                bg: Color::srgb(0.35, 0.75, 0.35),
+                border: Color::srgb(0.0, 0.5, 1.0),
+                text_color: Color::srgb(1.0, 1.0, 1.0),
+            },
+            disabled_draw: ButtonSimpleDrawState {
+                bg: Color::srgb(0.1, 0.1, 0.1),
+                border: Color::srgb(0.3, 0.3, 0.3),
+                text_color: Color::srgb(0.5, 0.5, 0.5),
+            },
+            on_press: None,
+            on_release: None,
+            disabled_system: None,
+            is_disabled: false,
+            last_interaction: Interaction::None,
+        }
+    }
+
+    pub fn small(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            font_size: 24.0,
+            width: Val::Px(80.0),
+            height: Val::Px(50.0),
+            border_width: Val::Px(2.0),
             standard_draw: ButtonSimpleDrawState {
                 bg: Color::srgb(0.15, 0.15, 0.15),
                 border: Color::BLACK,
@@ -117,7 +156,6 @@ impl ButtonSimple {
         let text_color = self.standard_draw.text_color;
 
         (
-            self,
             Button,
             Node {
                 width,
@@ -134,6 +172,7 @@ impl ButtonSimple {
                 TextColor(text_color),
                 TextFont::default().with_font_size(font_size),
             )],
+            self,
         )
     }
 }
