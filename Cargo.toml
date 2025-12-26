@@ -5,18 +5,33 @@ edition = "2024"
 
 [[bin]]
 name = "client"
-path = "src/bin/client.rs"
+path = "src/bin/client/main.rs"
 
 [[bin]]
 name = "server"
-path = "src/bin/server.rs"
+path = "src/bin/server/main.rs"
 
 [dependencies]
 bevy = "0.17.3"
-lightyear = "0.25.5"
+bevy_egui = "0.38"
+bevy-inspector-egui = "0.35.0"
+lightyear = { version = "0.25.5", features = [
+    "netcode",
+    "webtransport",
+    "webtransport_dangerous_configuration",
+    "input_native",
+] }
+serde = { version = "1", default-features = false, features = [
+    "alloc",
+    "derive",
+] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { version = "1", features = ["fs", "rt"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"
+getrandom = { version = "0.2", features = ["js"] }
 
 [profile.dev]
 opt-level = 0

@@ -1,0 +1,8 @@
+{
+  "name": "bits-dev-tools",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run launch-dev.ts"
+  }
+}
+

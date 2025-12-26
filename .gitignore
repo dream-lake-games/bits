@@ -48,3 +48,6 @@ tmp/
 # Build artifacts from macros subdirectory
 macros/target/
 macros/dist/
+
+# Local certificates
+certs/
