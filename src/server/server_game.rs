@@ -28,7 +28,7 @@ fn on_enter_ingame(mut commands: Commands) {
     ));
 }
 
-fn server_game_invariants() {}
+fn server_game_invariants(questions: Query<(&Question, Option<&Q>)>) {}
 
 fn on_exit_ingame(cleanup_q: Query<Entity, With<GameCleanup>>, mut commands: Commands) {
     for ent in &cleanup_q {
