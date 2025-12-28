@@ -18,25 +18,25 @@ export const CONFIG: Config = {
   logLevel: "info",
 
   server: {
-    x: 2320,
-    // x: 0,
+    // x: 2020,
+    x: 0,
     y: 0,
   },
 
   clientA: {
-    x: 2820,
-    // x: 400,
+    // x: 2820,
+    x: 400,
     y: 0,
   },
 
   clientB: {
-    x: 2820,
-    // x: 400,
+    // x: 2820,
+    x: 400,
     y: 400,
   },
 
   healthCheckTimeout: 5000,
   healthCheckInterval: 100,
   serverReadyMessage: "Certificate hash:",
-  windowPositionDelay: 100,
+  windowPositionDelay: 500,
 };

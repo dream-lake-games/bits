@@ -1,8 +1,7 @@
 use bevy::prelude::*;
 use bits::prelude::*;
-use lightyear::prelude::*;
 
-use crate::{server_question::GenerateQuestion, server_state::ServerState};
+use crate::server_state::ServerState;
 
 fn server_game_last_invariants() {}
 
@@ -10,18 +9,6 @@ fn server_game_last_invariants() {}
 struct GameCleanup;
 
 fn on_enter_ingame(mut commands: Commands) {
-    let empty_vessel = commands
-        .spawn((
-            Name::new("QuestionEmpty"),
-            Question::default(),
-            Replicate::to_clients(NetworkTarget::All),
-            GameCleanup,
-        ))
-        .id();
-    commands.trigger(GenerateQuestion {
-        entity: empty_vessel,
-    });
-
     commands.spawn((
         FlexSimple::new().bundle(),
         GameCleanup,
@@ -40,6 +27,8 @@ fn on_enter_ingame(mut commands: Commands) {
         ],
     ));
 }
+
+fn server_game_invariants() {}
 
 fn on_exit_ingame(cleanup_q: Query<Entity, With<GameCleanup>>, mut commands: Commands) {
     for ent in &cleanup_q {

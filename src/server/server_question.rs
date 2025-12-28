@@ -3,31 +3,15 @@ use bevy_http_client::prelude::*;
 use bits::prelude::*;
 use serde::Deserialize;
 
-fn server_question_last_invariants(questions_active_q: Query<Entity, With<QuestionActive>>) {
-    let num_active_questions = questions_active_q.iter().count();
-    assert!(num_active_questions <= 1);
-}
-
-#[derive(EntityEvent)]
-pub struct GenerateQuestion {
-    pub entity: Entity,
-}
-
 #[derive(Deserialize, Debug, Clone, Default)]
 struct LLMGeneratedQuestionResponse {}
 
-#[derive(Component)]
-#[require(Name)]
-struct PendingQuestionEntity;
-
-fn generate_new_question(
-    trigger: On<GenerateQuestion>,
-    pending_q: Query<Entity, With<PendingQuestionEntity>>,
-    mut ev_request: MessageWriter<TypedRequest<LLMGeneratedQuestionResponse>>,
+fn start_generation_if_needed(
+    question_generated_q: Query<Entity, Or<(With<QuestionGenerated>, With<QuestionGenerating>)>>,
     mut commands: Commands,
+    mut ev_request: MessageWriter<TypedRequest<LLMGeneratedQuestionResponse>>,
 ) {
-    if !pending_q.is_empty() {
-        info!("Skipping spawning new generate question task: task already exists");
+    if !question_generated_q.is_empty() {
         return;
     }
 
@@ -35,54 +19,61 @@ fn generate_new_question(
         .post("https://httpbin.org/anything")
         .try_with_type::<LLMGeneratedQuestionResponse>()
     {
-        let eid = trigger.entity;
-        commands.entity(eid).insert(PendingQuestionEntity);
+        commands.spawn((
+            Name::new("Question"),
+            Question::default(),
+            QuestionGenerating,
+        ));
         ev_request.write(request);
     }
 }
 
-fn handle_question_response(
+fn handle_generation_response(
     mut events: ResMut<Messages<TypedResponse<LLMGeneratedQuestionResponse>>>,
-    pending_q: Query<Entity, With<PendingQuestionEntity>>,
-    old_active_q: Query<Entity, With<QuestionActive>>,
+    mut generating_q: Query<(Entity, &mut Question), With<QuestionGenerating>>,
     mut commands: Commands,
 ) {
-    for response in events.drain() {
-        let _response: LLMGeneratedQuestionResponse = response.into_inner();
-        info!("Received question response: {:?}", _response);
+    let Ok((generating_eid, mut question)) = generating_q.single_mut() else {
+        return;
+    };
+    let Some(response) = events.drain().last() else {
+        return;
+    };
+    debug!("Got new question response: {:?}", response);
 
-        for eid in &old_active_q {
-            commands.entity(eid).remove::<QuestionActive>();
-        }
-
-        if let Ok(entity) = pending_q.single() {
-            commands.entity(entity).remove::<PendingQuestionEntity>();
-            commands.entity(entity).insert((
-                Name::new("Question"),
-                Question {
-                    question: "This is a test question".to_string(),
-                    answer: 6,
-                },
-                QuestionActive,
-            ));
-        }
-    }
+    commands
+        .entity(generating_eid)
+        .remove::<QuestionGenerating>();
+    commands.entity(generating_eid).insert(QuestionGenerated);
+    question.question = String::from("yooo fake question");
+    question.answer = 6;
 }
 
-fn handle_question_error(
+fn handle_generation_failed(
     mut ev_error: MessageReader<TypedResponseError<LLMGeneratedQuestionResponse>>,
+    generating_q: Query<(Entity,), With<QuestionGenerating>>,
+    mut commands: Commands,
 ) {
-    for error in ev_error.read() {
-        error!("Error generating question: {}", error.err);
-    }
+    let Ok((generation_eid,)) = generating_q.single() else {
+        return;
+    };
+    let Some(last_error) = ev_error.read().last() else {
+        return;
+    };
+    error!("Error generating question: {:?}", last_error);
+    commands.entity(generation_eid).despawn();
 }
 
 pub fn server_question_plugin_fn(app: &mut App) {
     app.register_request_type::<LLMGeneratedQuestionResponse>();
 
-    app.add_observer(generate_new_question);
-
-    app.add_systems(Last, server_question_last_invariants);
-
-    app.add_systems(Update, (handle_question_response, handle_question_error));
+    app.add_systems(
+        FixedUpdate,
+        (
+            start_generation_if_needed,
+            handle_generation_response,
+            handle_generation_failed,
+        )
+            .chain(),
+    );
 }

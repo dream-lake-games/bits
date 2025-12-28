@@ -1,6 +1,6 @@
 use bevy::{ecs::system::BoxedSystem, prelude::*};
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct ButtonSimpleDrawState {
     pub bg: Color,
     pub border: Color,
@@ -17,7 +17,7 @@ impl Default for ButtonSimpleDrawState {
     }
 }
 
-#[derive(Component)]
+#[derive(Component, Debug)]
 #[require(Button, BackgroundColor, BorderColor, Name)]
 pub struct ButtonSimple {
     text: String,
@@ -29,18 +29,14 @@ pub struct ButtonSimple {
     pub hover_draw: ButtonSimpleDrawState,
     pub press_draw: ButtonSimpleDrawState,
     pub disabled_draw: ButtonSimpleDrawState,
-    pub on_press: Option<fn(&mut Commands)>,
-    pub on_release: Option<fn(&mut Commands)>,
+    pub on_press: Option<BoxedSystem<(), ()>>,
+    pub on_release: Option<BoxedSystem<(), ()>>,
     pub disabled_system: Option<BoxedSystem<(), bool>>,
     is_disabled: bool,
     last_interaction: Interaction,
 }
 
 impl ButtonSimple {
-    pub fn new(text: impl Into<String>) -> Self {
-        Self::medium(text)
-    }
-
     pub fn medium(text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
@@ -127,13 +123,13 @@ impl ButtonSimple {
         self
     }
 
-    pub fn with_on_press(mut self, callback: fn(&mut Commands)) -> Self {
-        self.on_press = Some(callback);
+    pub fn with_on_press<M>(mut self, system: impl IntoSystem<(), (), M> + 'static) -> Self {
+        self.on_press = Some(Box::new(IntoSystem::into_system(system)));
         self
     }
 
-    pub fn with_on_release(mut self, callback: fn(&mut Commands)) -> Self {
-        self.on_release = Some(callback);
+    pub fn with_on_release<M>(mut self, system: impl IntoSystem<(), (), M> + 'static) -> Self {
+        self.on_release = Some(Box::new(IntoSystem::into_system(system)));
         self
     }
 
@@ -221,11 +217,89 @@ fn button_disabled_check_system(world: &mut World) {
     }
 }
 
-fn button_simple_system(
+fn button_callback_runner_system(world: &mut World) {
+    let mut press_callbacks = Vec::new();
+    let mut release_callbacks = Vec::new();
+    let mut buttons_to_update = Vec::new();
+
+    {
+        let mut query = world.query::<(Entity, &Interaction, &ButtonSimple)>();
+        for (entity, interaction, button) in query.iter(world) {
+            let current = *interaction;
+            let previous = button.last_interaction;
+
+            if !button.is_disabled {
+                if current == Interaction::Pressed
+                    && previous != Interaction::Pressed
+                    && button.on_press.is_some()
+                {
+                    press_callbacks.push(entity);
+                }
+
+                if previous == Interaction::Pressed
+                    && current == Interaction::Hovered
+                    && button.on_release.is_some()
+                {
+                    release_callbacks.push(entity);
+                }
+            }
+
+            if current != previous {
+                buttons_to_update.push((entity, current));
+            }
+        }
+    }
+
+    for entity in press_callbacks {
+        let system_opt = world
+            .get_mut::<ButtonSimple>(entity)
+            .expect("ButtonSimple entity should exist")
+            .on_press
+            .take();
+
+        if let Some(mut press_system) = system_opt {
+            press_system.initialize(world);
+            let _ = press_system.run((), world);
+            press_system.apply_deferred(world);
+
+            let mut button = world
+                .get_mut::<ButtonSimple>(entity)
+                .expect("ButtonSimple entity should exist");
+            button.on_press = Some(press_system);
+        }
+    }
+
+    for entity in release_callbacks {
+        let system_opt = world
+            .get_mut::<ButtonSimple>(entity)
+            .expect("ButtonSimple entity should exist")
+            .on_release
+            .take();
+
+        if let Some(mut release_system) = system_opt {
+            release_system.initialize(world);
+            let _ = release_system.run((), world);
+            release_system.apply_deferred(world);
+
+            let mut button = world
+                .get_mut::<ButtonSimple>(entity)
+                .expect("ButtonSimple entity should exist");
+            button.on_release = Some(release_system);
+        }
+    }
+
+    for (entity, current) in buttons_to_update {
+        if let Some(mut button) = world.get_mut::<ButtonSimple>(entity) {
+            button.last_interaction = current;
+        }
+    }
+}
+
+fn button_visual_system(
     mut buttons: Query<
         (
             &Interaction,
-            &mut ButtonSimple,
+            &ButtonSimple,
             &mut BackgroundColor,
             &mut BorderColor,
             &Children,
@@ -233,11 +307,9 @@ fn button_simple_system(
         Or<(Changed<Interaction>, Changed<ButtonSimple>)>,
     >,
     mut text_query: Query<&mut TextColor>,
-    mut commands: Commands,
 ) {
-    for (interaction, mut button, mut bg_color, mut border_color, children) in &mut buttons {
+    for (interaction, button, mut bg_color, mut border_color, children) in &mut buttons {
         let current = *interaction;
-        let previous = button.last_interaction;
 
         let draw_state = if button.is_disabled {
             &button.disabled_draw
@@ -257,28 +329,17 @@ fn button_simple_system(
                 text_color.0 = draw_state.text_color;
             }
         }
-
-        if !button.is_disabled {
-            if current == Interaction::Pressed && previous != Interaction::Pressed {
-                if let Some(callback) = button.on_press {
-                    callback(&mut commands);
-                }
-            }
-
-            if previous == Interaction::Pressed && current == Interaction::Hovered {
-                if let Some(callback) = button.on_release {
-                    callback(&mut commands);
-                }
-            }
-        }
-
-        button.last_interaction = current;
     }
 }
 
 pub fn button_simple_plugin_fn(app: &mut App) {
     app.add_systems(
-        Update,
-        (button_disabled_check_system, button_simple_system).chain(),
+        FixedUpdate,
+        (
+            button_disabled_check_system,
+            button_visual_system,
+            button_callback_runner_system,
+        )
+            .chain(),
     );
 }

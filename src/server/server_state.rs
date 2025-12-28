@@ -9,4 +9,3 @@ pub enum ServerState {
 pub fn server_state_plugin_fn(app: &mut App) {
     app.insert_state(ServerState::Lobby);
 }
-

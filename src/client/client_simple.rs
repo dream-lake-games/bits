@@ -1,24 +1,21 @@
+use std::collections::VecDeque;
+
 use bevy::prelude::*;
-use bits::consts::{CLIENT_ADDR, SERVER_ADDR};
+use bits::prelude::*;
 use lightyear::{
+    input::client::InputSystems,
     netcode::{Key, NetcodeClient},
     prelude::{
         client::{ClientPlugins, NetcodeConfig, WebTransportClientIo},
+        input::native::{ActionState, InputMarker},
         *,
     },
 };
-
-fn get_client_id_from_name(name: &str) -> u64 {
-    match name {
-        "A" => 0,
-        "B" => 1,
-        _ => panic!("Client name must be 'A' or 'B', got: {}", name),
-    }
-}
+use rand::random;
 
 fn simple_client_startup(mut commands: Commands) -> Result<()> {
-    let client_name = std::env::var("CLIENT_NAME").unwrap_or_else(|_| "A".to_string());
-    let client_id = get_client_id_from_name(&client_name);
+    let client_id = random::<u64>();
+    let peer_id = PeerId::Netcode(client_id);
 
     let auth = Authentication::Manual {
         server_addr: SERVER_ADDR,
@@ -32,6 +29,7 @@ fn simple_client_startup(mut commands: Commands) -> Result<()> {
             Client::default(),
             lightyear::prelude::LocalAddr(CLIENT_ADDR),
             PeerAddr(SERVER_ADDR),
+            LocalId(peer_id),
             Link::new(None),
             ReplicationReceiver::default(),
             NetcodeClient::new(auth, NetcodeConfig::default())?,
@@ -49,8 +47,56 @@ fn simple_client_startup(mut commands: Commands) -> Result<()> {
     Ok(())
 }
 
+fn handle_client_connected(trigger: On<Add, Connected>, mut commands: Commands) {
+    info!("Client connected, spawning input entity");
+    commands.entity(trigger.entity).insert((
+        ActionState::<WrappedClientInput>::default(),
+        InputMarker::<WrappedClientInput>::default(),
+        Name::new("LocalPlayerInput"),
+    ));
+}
+
+#[derive(Debug, Clone, Resource, Default)]
+pub struct InputsQueue {
+    pub queue: VecDeque<ClientInput>,
+}
+
+fn buffer_input(
+    mut query: Query<&mut ActionState<WrappedClientInput>, With<InputMarker<WrappedClientInput>>>,
+    mut inputs_queue: ResMut<InputsQueue>,
+    local_id: Query<(&LocalId,), With<Connected>>,
+) {
+    let Ok(mut action_state) = query.single_mut() else {
+        warn!("No action state to write to in client");
+        return;
+    };
+    let Ok(peer_id) = local_id.single().map(|thing| thing.0.0.clone()) else {
+        warn!("No connected peer_id to use to send buffered input");
+        return;
+    };
+
+    let Some(next_action) = inputs_queue.queue.pop_front() else {
+        action_state.0 = WrappedClientInput {
+            peer_id: Some(peer_id),
+            payload: ClientInput::Noop,
+        };
+        return;
+    };
+    action_state.0 = WrappedClientInput {
+        peer_id: Some(peer_id),
+        payload: next_action,
+    };
+}
+
 pub fn client_simple_plugin_fn(app: &mut App) {
     app.add_plugins(ClientPlugins::default());
     app.add_systems(Startup, simple_client_startup);
-}
 
+    app.add_observer(handle_client_connected);
+
+    app.insert_resource(InputsQueue::default());
+    app.add_systems(
+        FixedPreUpdate,
+        buffer_input.in_set(InputSystems::WriteClientInputs),
+    );
+}

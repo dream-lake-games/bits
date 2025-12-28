@@ -164,5 +164,5 @@ fn text_simple_system(world: &mut World) {
 }
 
 pub fn text_simple_plugin_fn(app: &mut App) {
-    app.add_systems(Update, text_simple_system);
+    app.add_systems(FixedUpdate, text_simple_system);
 }
