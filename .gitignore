@@ -51,3 +51,6 @@ macros/dist/
 
 # Local certificates
 certs/
+
+# Devlog assets (videos, screenshots, etc.)
+devlog/assets/
