@@ -13,6 +13,7 @@ fn on_enter_ingame(mut commands: Commands, player_info: Single<&PlayerInfo>) {
     commands.spawn((
         Name::new("GameState"),
         GameCleanup,
+        Replicate::to_clients(NetworkTarget::All),
         GameState {
             round: 0,
             scores: player_info
@@ -347,7 +348,12 @@ fn process_bet_input(
     >,
     active_question_q: Query<(&Question, &QuestionActive)>,
     mut active_bets_q: Query<(&mut Bets, &mut BetsActive)>,
+    round_cap: Query<&RoundCap>,
 ) {
+    if !round_cap.is_empty() {
+        return;
+    }
+
     let Ok((question, question_active)) = active_question_q.single() else {
         return;
     };
@@ -465,20 +471,68 @@ fn finish_betting(
 }
 
 fn maybe_make_round_cap(
-    active_bets_q: Query<&BetsActive>,
+    active_bets_q: Query<(&Bets, &BetsActive)>,
+    active_question_q: Query<&Question, With<QuestionActive>>,
     round_cap_q: Query<Entity, With<RoundCap>>,
     player_info_q: Query<&PlayerInfo>,
     mut commands: Commands,
+    mut game_state: Single<&mut GameState>,
 ) {
     if !round_cap_q.is_empty() {
         return;
     }
 
-    let Ok(bets_active) = active_bets_q.single() else {
+    let Ok((bets, bets_active)) = active_bets_q.single() else {
         return;
     };
     if bets_active.bets_seconds_remaining.is_some() {
         return;
+    }
+
+    let Ok(question) = active_question_q.single() else {
+        return;
+    };
+
+    let answer = question.answer;
+    let valid_guesses: Vec<u32> = question
+        .guesses
+        .values()
+        .filter(|&&g| g <= answer)
+        .copied()
+        .collect();
+    let winning_guess = valid_guesses.into_iter().max().unwrap_or(0);
+    let is_lowball = winning_guess == 0;
+
+    let mut delta_this_round: HashMap<Username, i32> = game_state
+        .scores
+        .keys()
+        .map(|username| (username.clone(), 0))
+        .collect();
+
+    if !is_lowball {
+        for (username, &guess) in &question.guesses {
+            if guess == winning_guess {
+                *delta_this_round.get_mut(username).unwrap() += 1;
+            }
+        }
+    }
+
+    for (&guess_value, bet_list) in &bets.bets {
+        let is_winning = guess_value == winning_guess;
+        for bet in bet_list {
+            let delta = delta_this_round.get_mut(&bet.owner).unwrap();
+            if is_winning {
+                let multiplier = if is_lowball { 2 } else { 1 };
+                *delta += ((bet.num_free + bet.num_paid) * multiplier) as i32;
+            } else {
+                *delta -= bet.num_paid as i32;
+            }
+        }
+    }
+
+    for (username, delta) in &delta_this_round {
+        let score = game_state.scores.get_mut(username).unwrap();
+        *score = (*score as i32 + delta) as u32;
     }
 
     let player_info = player_info_q.single().unwrap();
@@ -493,6 +547,7 @@ fn maybe_make_round_cap(
         RoundCap {
             seconds_until_auto_continue: Some(30.0),
             continue_locked,
+            delta_this_round,
         },
     ));
 }

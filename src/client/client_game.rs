@@ -327,8 +327,22 @@ fn on_enter_guessing(mut commands: Commands) {
     ));
 }
 
-fn update_guessing(mut pending_guess: Single<&mut PendingGuess>, mut commands: Commands) {
-    // HACK: Just immediately submit a guess
+fn update_guessing(
+    mut pending_guess: Single<&mut PendingGuess>,
+    connection_state: Res<State<ClientConnectionState>>,
+    question_q: Query<&Question, With<QuestionActive>>,
+    mut commands: Commands,
+) {
+    // HACK: Auto-submit guess if we haven't yet
+    let ClientConnectionState::Named { named } = connection_state.get() else {
+        return;
+    };
+    let Ok(question) = question_q.single() else {
+        return;
+    };
+    if question.guesses.contains_key(&named.username) {
+        return;
+    }
     pending_guess.current_number = rand::thread_rng().gen_range(1..=100).to_string();
     commands.run_system_cached(handle_submit_guess);
 }
@@ -535,7 +549,7 @@ fn on_enter_betting(
                                             })
                                             .map(|b| (b.num_free, b.num_paid))
                                             .unwrap_or((0, 0));
-                                        inputs_queue.queue.push_back(ClientInput::SubmitBet {
+                                        inputs_queue.push(ClientInput::SubmitBet {
                                             guess: guess_value,
                                             num_free: current_free.saturating_sub(1),
                                             num_paid: current_paid,
@@ -592,7 +606,7 @@ fn on_enter_betting(
                                             })
                                             .map(|b| (b.num_free, b.num_paid))
                                             .unwrap_or((0, 0));
-                                        inputs_queue.queue.push_back(ClientInput::SubmitBet {
+                                        inputs_queue.push(ClientInput::SubmitBet {
                                             guess: guess_value,
                                             num_free: current_free + 1,
                                             num_paid: current_paid,
@@ -654,7 +668,7 @@ fn on_enter_betting(
                                             })
                                             .map(|b| (b.num_free, b.num_paid))
                                             .unwrap_or((0, 0));
-                                        inputs_queue.queue.push_back(ClientInput::SubmitBet {
+                                        inputs_queue.push(ClientInput::SubmitBet {
                                             guess: guess_value,
                                             num_free: current_free,
                                             num_paid: current_paid.saturating_sub(1),
@@ -731,7 +745,7 @@ fn on_enter_betting(
                                             })
                                             .map(|b| (b.num_free, b.num_paid))
                                             .unwrap_or((0, 0));
-                                        inputs_queue.queue.push_back(ClientInput::SubmitBet {
+                                        inputs_queue.push(ClientInput::SubmitBet {
                                             guess: guess_value,
                                             num_free: current_free,
                                             num_paid: current_paid + 1,
@@ -783,7 +797,7 @@ fn on_enter_betting(
                               bets_active_q: Query<&BetsActive>| {
                             if let Ok(bets_active) = bets_active_q.single() {
                                 if !is_user_locked(bets_active, &username_for_lock) {
-                                    inputs_queue.queue.push_back(ClientInput::LockBets);
+                                    inputs_queue.push(ClientInput::LockBets);
                                 }
                             }
                         },
@@ -793,7 +807,56 @@ fn on_enter_betting(
         });
 }
 
-fn update_betting() {}
+fn has_any_bets(bets: &Bets, username: &str) -> bool {
+    bets.bets
+        .values()
+        .flat_map(|bet_list| bet_list.iter())
+        .any(|b| b.owner == username)
+}
+
+fn update_betting(
+    connection_state: Res<State<ClientConnectionState>>,
+    bets_q: Query<(&Bets, &BetsActive)>,
+    question_q: Query<&Question, With<QuestionActive>>,
+    game_state_q: Query<&GameState>,
+    mut inputs_queue: ResMut<InputsQueue>,
+) {
+    // HACK: Auto-bet and lock for testing
+    let ClientConnectionState::Named { named } = connection_state.get() else {
+        return;
+    };
+    let Ok((bets, bets_active)) = bets_q.single() else {
+        return;
+    };
+
+    if !has_any_bets(bets, &named.username) {
+        let Ok(question) = question_q.single() else {
+            return;
+        };
+        let Ok(game_state) = game_state_q.single() else {
+            return;
+        };
+        let mut possible_guesses: Vec<u32> = question.guesses.values().cloned().collect();
+        possible_guesses.push(0);
+        possible_guesses.sort();
+        possible_guesses.dedup();
+
+        let chosen_guess =
+            possible_guesses[rand::thread_rng().gen_range(0..possible_guesses.len())];
+        let score = game_state.scores.get(&named.username).copied().unwrap_or(0);
+        let num_paid = rand::thread_rng().gen_range(0..=score);
+
+        inputs_queue.push(ClientInput::SubmitBet {
+            guess: chosen_guess,
+            num_free: 2,
+            num_paid,
+        });
+    }
+
+    if !is_user_locked(bets_active, &named.username) {
+        inputs_queue.push(ClientInput::LockBets);
+    }
+}
 
 fn on_exit_betting(cleanup_q: Query<Entity, With<BettingCleanup>>, mut commands: Commands) {
     for ent in &cleanup_q {
@@ -804,9 +867,88 @@ fn on_exit_betting(cleanup_q: Query<Entity, With<BettingCleanup>>, mut commands:
 #[derive(Component)]
 struct ReviewingCleanup;
 
-fn on_enter_reviewing(mut _commands: Commands) {}
+fn is_user_continue_locked(round_cap: &RoundCap, username: &str) -> bool {
+    round_cap
+        .continue_locked
+        .get(username)
+        .copied()
+        .unwrap_or(false)
+}
 
-fn update_reviewing() {}
+fn on_enter_reviewing(mut commands: Commands, connection_state: Res<State<ClientConnectionState>>) {
+    let ClientConnectionState::Named { named } = connection_state.get() else {
+        warn!("Client not named when entering reviewing");
+        return;
+    };
+    let current_username = named.username.clone();
+
+    let username_for_delta = current_username.clone();
+    let username_for_disabled = current_username.clone();
+    let username_for_release = current_username.clone();
+
+    commands.spawn((
+        FlexSimple::new().bundle(),
+        ReviewingCleanup,
+        children![
+            TextSimple::p("Round Summary").bundle(),
+            Spacer::height(Val::Px(20.0)).bundle(),
+            TextSimple::p("")
+                .with_text_system(move |round_cap_q: Query<&RoundCap>| -> String {
+                    let Ok(round_cap) = round_cap_q.single() else {
+                        return "Delta: ?".to_string();
+                    };
+                    let delta = round_cap
+                        .delta_this_round
+                        .get(&username_for_delta)
+                        .copied()
+                        .unwrap_or(0);
+                    let delta_str = if delta >= 0 {
+                        format!("+{}", delta)
+                    } else {
+                        format!("{}", delta)
+                    };
+                    format!("Delta: {}", delta_str)
+                })
+                .bundle(),
+            Spacer::height(Val::Px(20.0)).bundle(),
+            ButtonSimple::small("Continue")
+                .with_disabled_system(move |round_cap_q: Query<&RoundCap>| -> bool {
+                    let Ok(round_cap) = round_cap_q.single() else {
+                        return true;
+                    };
+                    is_user_continue_locked(round_cap, &username_for_disabled)
+                })
+                .with_on_release(
+                    move |mut inputs_queue: ResMut<InputsQueue>, round_cap_q: Query<&RoundCap>| {
+                        if let Ok(round_cap) = round_cap_q.single() {
+                            if !is_user_continue_locked(round_cap, &username_for_release) {
+                                inputs_queue.push(ClientInput::VoteContinue);
+                            }
+                        }
+                    },
+                )
+                .bundle(),
+        ],
+    ));
+}
+
+fn update_reviewing(
+    connection_state: Res<State<ClientConnectionState>>,
+    round_cap_q: Query<&RoundCap>,
+    mut inputs_queue: ResMut<InputsQueue>,
+) {
+    // HACK: Auto-continue for testing
+    let ClientConnectionState::Named { named } = connection_state.get() else {
+        return;
+    };
+    let Ok(round_cap) = round_cap_q.single() else {
+        return;
+    };
+    if is_user_continue_locked(round_cap, &named.username) {
+        return;
+    }
+    inputs_queue.push(ClientInput::VoteContinue);
+}
 
 fn on_exit_reviewing(cleanup_q: Query<Entity, With<ReviewingCleanup>>, mut commands: Commands) {
     for ent in &cleanup_q {

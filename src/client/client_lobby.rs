@@ -262,7 +262,7 @@ fn watch_submit(mut pending_name: Single<&mut PendingName>, mut inputs_queue: Re
     }
 
     if pending_name.submit_pressed && !pending_name.claim_sent {
-        inputs_queue.queue.push_back(ClientInput::ClaimName {
+        inputs_queue.push(ClientInput::ClaimName {
             username: pending_name.username.clone(),
         });
         pending_name.claim_sent = true;

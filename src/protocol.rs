@@ -67,7 +67,7 @@ impl PlayerInfo {
 pub struct Question {
     pub round: Option<u32>,
     pub question: String,
-    pub answer: i32,
+    pub answer: u32,
     pub guesses: HashMap<Username, u32>,
 }
 
@@ -177,6 +177,7 @@ pub struct BetsRetired;
 pub struct RoundCap {
     pub seconds_until_auto_continue: Option<f32>,
     pub continue_locked: HashMap<Username, bool>,
+    pub delta_this_round: HashMap<Username, i32>,
 }
 
 impl MapEntities for WrappedClientInput {

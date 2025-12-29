@@ -21,8 +21,9 @@ fn player_list_text(player_info_q: Query<&PlayerInfo>) -> String {
 
     let mut lines = vec!["Players:".to_string()];
 
-    // Named players first
-    for named in &player_info.named_players {
+    let mut named_players: Vec<_> = player_info.named_players.iter().collect();
+    named_players.sort_by_key(|n| &n.username);
+    for named in named_players {
         let status = if named.peer_id.is_none() {
             " [DISCONNECTED]"
         } else {
@@ -31,7 +32,6 @@ fn player_list_text(player_info_q: Query<&PlayerInfo>) -> String {
         lines.push(format!("  - {}{}", named.username, status));
     }
 
-    // Then unnamed players
     for _ in &player_info.unnamed_players {
         lines.push("  - (unnamed)".to_string());
     }
@@ -162,10 +162,15 @@ fn guessing_players_text(
     };
 
     let mut lines = vec!["Guessing:".to_string()];
-    for named in &player_info.named_players {
-        if !question.guesses.contains_key(&named.username) {
-            lines.push(format!("  - {}", named.username));
-        }
+    let mut guessing: Vec<&str> = player_info
+        .named_players
+        .iter()
+        .filter(|n| !question.guesses.contains_key(&n.username))
+        .map(|n| n.username.as_str())
+        .collect();
+    guessing.sort();
+    for name in guessing {
+        lines.push(format!("  - {}", name));
     }
     lines.join("\n")
 }
@@ -182,10 +187,15 @@ fn submitted_players_text(
     };
 
     let mut lines = vec!["Submitted:".to_string()];
-    for named in &player_info.named_players {
-        if question.guesses.contains_key(&named.username) {
-            lines.push(format!("  - {}", named.username));
-        }
+    let mut submitted: Vec<&str> = player_info
+        .named_players
+        .iter()
+        .filter(|n| question.guesses.contains_key(&n.username))
+        .map(|n| n.username.as_str())
+        .collect();
+    submitted.sort();
+    for name in submitted {
+        lines.push(format!("  - {}", name));
     }
     lines.join("\n")
 }
@@ -280,12 +290,13 @@ fn betting_bets_locked_text(
         return "Bets Locked:".to_string();
     };
 
-    let locked_names: Vec<&str> = active
+    let mut locked_names: Vec<&str> = active
         .bets_locked
         .iter()
         .filter(|(_, locked)| **locked)
         .map(|(name, _)| name.as_str())
         .collect();
+    locked_names.sort();
 
     let total = player_info.named_players.len();
     let locked_count = locked_names.len();
@@ -355,12 +366,13 @@ fn on_enter_betting(mut commands: Commands, question_q: Query<&Question, With<Qu
                                 if guess_value == 0 {
                                     lines.push("LOWBALL".to_string());
                                 } else if let Ok(question) = question_q.single() {
-                                    let owners: Vec<&str> = question
+                                    let mut owners: Vec<&str> = question
                                         .guesses
                                         .iter()
                                         .filter(|(_, v)| **v == guess_value)
                                         .map(|(name, _)| name.as_str())
                                         .collect();
+                                    owners.sort();
                                     lines.push(format!("Owner(s): {}", owners.join(", ")));
                                 }
 
@@ -371,7 +383,9 @@ fn on_enter_betting(mut commands: Commands, question_q: Query<&Question, With<Qu
 
                                 if let Ok(bets) = bets_q.single() {
                                     if let Some(bet_list) = bets.bets.get(&guess_value) {
-                                        for bet in bet_list {
+                                        let mut sorted_bets: Vec<_> = bet_list.iter().collect();
+                                        sorted_bets.sort_by_key(|b| &b.owner);
+                                        for bet in sorted_bets {
                                             let amount = bet.num_free + bet.num_paid;
                                             lines.push(format!("  - {}: {}", bet.owner, amount));
                                         }
@@ -417,6 +431,284 @@ fn on_exit_betting(cleanup_q: Query<Entity, With<BettingCleanup>>, mut commands:
     }
 }
 
+#[derive(Component)]
+struct ReviewingCleanup;
+
+fn reviewing_question_text(question_q: Query<&Question, With<QuestionActive>>) -> String {
+    question_q
+        .single()
+        .map(|q| q.question.clone())
+        .unwrap_or("(no question)".to_string())
+}
+
+fn reviewing_time_remaining_text(round_cap_q: Query<&RoundCap>) -> String {
+    if let Ok(round_cap) = round_cap_q.single() {
+        let seconds = round_cap
+            .seconds_until_auto_continue
+            .map(|s| s.max(0.0))
+            .unwrap_or(0.0);
+        format!("Next round in: {:.1}s", seconds)
+    } else {
+        "Next round in: 0.0s".to_string()
+    }
+}
+
+fn reviewing_continue_votes_text(
+    round_cap_q: Query<&RoundCap>,
+    player_info_q: Query<&PlayerInfo>,
+) -> String {
+    let Ok(round_cap) = round_cap_q.single() else {
+        return "Continue:".to_string();
+    };
+    let Ok(player_info) = player_info_q.single() else {
+        return "Continue:".to_string();
+    };
+
+    let mut voted_names: Vec<&str> = round_cap
+        .continue_locked
+        .iter()
+        .filter(|(_, voted)| **voted)
+        .map(|(name, _)| name.as_str())
+        .collect();
+    voted_names.sort();
+
+    let total = player_info.named_players.len();
+    let voted_count = voted_names.len();
+
+    if voted_names.is_empty() {
+        format!("Continue: (none) ({}/{})", voted_count, total)
+    } else {
+        format!(
+            "Continue: {} ({}/{})",
+            voted_names.join(", "),
+            voted_count,
+            total
+        )
+    }
+}
+
+fn reviewing_correct_answer_text(question_q: Query<&Question, With<QuestionActive>>) -> String {
+    question_q
+        .single()
+        .map(|q| q.answer.to_string())
+        .unwrap_or("?".to_string())
+}
+
+fn get_winning_guess(question: &Question) -> u32 {
+    let answer = question.answer;
+    question
+        .guesses
+        .values()
+        .filter(|&&g| g <= answer)
+        .copied()
+        .max()
+        .unwrap_or(0)
+}
+
+fn reviewing_winning_bet_text(
+    question_q: Query<&Question, With<QuestionActive>>,
+    bets_q: Query<&Bets, With<BetsActive>>,
+) -> String {
+    let Ok(question) = question_q.single() else {
+        return "No question".to_string();
+    };
+    let Ok(bets) = bets_q.single() else {
+        return "No bets".to_string();
+    };
+
+    let winning_guess = get_winning_guess(question);
+    let mut lines = Vec::new();
+
+    if winning_guess == 0 {
+        lines.push("LOWBALL".to_string());
+    } else {
+        let mut owners: Vec<&str> = question
+            .guesses
+            .iter()
+            .filter(|(_, v)| **v == winning_guess)
+            .map(|(name, _)| name.as_str())
+            .collect();
+        owners.sort();
+        lines.push(format!("Owner(s): {}", owners.join(", ")));
+    }
+
+    lines.push(String::new());
+    lines.push(format!("Guess: {}", winning_guess));
+    lines.push(String::new());
+    lines.push("Bets:".to_string());
+
+    let bet_list = bets.bets.get(&winning_guess);
+    if bet_list.map(|b| b.is_empty()).unwrap_or(true) {
+        lines.push("  (none)".to_string());
+    } else if let Some(bet_list) = bet_list {
+        let mut sorted_bets: Vec<_> = bet_list.iter().collect();
+        sorted_bets.sort_by_key(|b| &b.owner);
+        for bet in sorted_bets {
+            let amount = bet.num_free + bet.num_paid;
+            lines.push(format!("  - {}: {}", bet.owner, amount));
+        }
+    }
+
+    lines.join("\n")
+}
+
+fn reviewing_scores_text(game_state_q: Query<&GameState>, round_cap_q: Query<&RoundCap>) -> String {
+    let Ok(game_state) = game_state_q.single() else {
+        return "Scores:\n(no game state)".to_string();
+    };
+    let Ok(round_cap) = round_cap_q.single() else {
+        return "Scores:\n(no round cap)".to_string();
+    };
+
+    let mut lines = vec!["Scores:".to_string()];
+
+    let mut scores: Vec<_> = game_state.scores.iter().collect();
+    scores.sort_by(|a, b| b.1.cmp(a.1));
+
+    for (username, &score) in scores {
+        let delta = round_cap
+            .delta_this_round
+            .get(username)
+            .copied()
+            .unwrap_or(0);
+        let delta_str = if delta >= 0 {
+            format!("+{}", delta)
+        } else {
+            format!("{}", delta)
+        };
+        lines.push(format!("{}: {} ({})", username, score, delta_str));
+    }
+
+    lines.join("\n")
+}
+
+fn on_enter_reviewing(mut commands: Commands, game_state_q: Query<&GameState>) {
+    // HACK: Log scores for testing
+    if let Ok(game_state) = game_state_q.single() {
+        let mut scores: Vec<_> = game_state.scores.iter().collect();
+        scores.sort_by(|a, b| b.1.cmp(a.1));
+        let score_strs: Vec<String> = scores
+            .iter()
+            .map(|(name, score)| format!("{}: {}", name, score))
+            .collect();
+        info!(
+            "mork - Round {} Scores: {}",
+            game_state.round,
+            score_strs.join(", ")
+        );
+    }
+    commands.spawn((
+        FlexSimple::new().bundle(),
+        ReviewingCleanup,
+        children![
+            (
+                FlexSimple::new()
+                    .with_size(Val::Percent(100.0), Val::Percent(15.0))
+                    .bundle(),
+                children![
+                    TextSimple::p("")
+                        .with_text_system(reviewing_question_text)
+                        .bundle(),
+                    Spacer::height(Val::Px(10.0)).bundle(),
+                    TextSimple::p("")
+                        .with_text_system(reviewing_time_remaining_text)
+                        .bundle(),
+                    Spacer::height(Val::Px(5.0)).bundle(),
+                    TextSimple::p("")
+                        .with_text_system(reviewing_continue_votes_text)
+                        .bundle(),
+                ],
+            ),
+            (
+                Node {
+                    width: Val::Percent(100.0),
+                    height: Val::Percent(85.0),
+                    flex_direction: FlexDirection::Row,
+                    align_items: AlignItems::FlexStart,
+                    justify_content: JustifyContent::Center,
+                    column_gap: Val::Px(20.0),
+                    padding: UiRect::horizontal(Val::Px(20.0)),
+                    ..default()
+                },
+                children![
+                    (
+                        Node {
+                            width: Val::Percent(33.33),
+                            height: Val::Percent(100.0),
+                            flex_direction: FlexDirection::Column,
+                            align_items: AlignItems::Center,
+                            justify_content: JustifyContent::FlexStart,
+                            padding: UiRect::all(Val::Px(15.0)),
+                            border: UiRect::all(Val::Px(1.0)),
+                            ..default()
+                        },
+                        BackgroundColor(Color::srgb(0.1, 0.1, 0.15)),
+                        BorderColor::all(Color::srgb(0.3, 0.3, 0.4)),
+                        children![
+                            TextSimple::p("Correct Answer")
+                                .with_font_size(18.0)
+                                .bundle(),
+                            Spacer::height(Val::Px(20.0)).bundle(),
+                            TextSimple::p("")
+                                .with_font_size(72.0)
+                                .with_text_system(reviewing_correct_answer_text)
+                                .bundle(),
+                        ],
+                    ),
+                    (
+                        Node {
+                            width: Val::Percent(33.33),
+                            height: Val::Percent(100.0),
+                            flex_direction: FlexDirection::Column,
+                            align_items: AlignItems::Center,
+                            justify_content: JustifyContent::FlexStart,
+                            padding: UiRect::all(Val::Px(15.0)),
+                            border: UiRect::all(Val::Px(1.0)),
+                            ..default()
+                        },
+                        BackgroundColor(Color::srgb(0.1, 0.1, 0.15)),
+                        BorderColor::all(Color::srgb(0.3, 0.3, 0.4)),
+                        children![
+                            TextSimple::p("Winning Bet").with_font_size(18.0).bundle(),
+                            Spacer::height(Val::Px(15.0)).bundle(),
+                            TextSimple::p("")
+                                .with_font_size(14.0)
+                                .with_text_system(reviewing_winning_bet_text)
+                                .bundle(),
+                        ],
+                    ),
+                    (
+                        Node {
+                            width: Val::Percent(33.33),
+                            height: Val::Percent(100.0),
+                            flex_direction: FlexDirection::Column,
+                            align_items: AlignItems::Center,
+                            justify_content: JustifyContent::FlexStart,
+                            padding: UiRect::all(Val::Px(15.0)),
+                            border: UiRect::all(Val::Px(1.0)),
+                            ..default()
+                        },
+                        BackgroundColor(Color::srgb(0.1, 0.1, 0.15)),
+                        BorderColor::all(Color::srgb(0.3, 0.3, 0.4)),
+                        children![
+                            TextSimple::p("")
+                                .with_font_size(14.0)
+                                .with_text_system(reviewing_scores_text)
+                                .bundle(),
+                        ],
+                    ),
+                ],
+            ),
+        ],
+    ));
+}
+
+fn on_exit_reviewing(cleanup_q: Query<Entity, With<ReviewingCleanup>>, mut commands: Commands) {
+    for ent in &cleanup_q {
+        commands.entity(ent).despawn();
+    }
+}
+
 pub fn host_game_plugin_fn(app: &mut App) {
     app.add_systems(OnEnter(HostState::Lobby), on_enter_lobby);
     app.add_systems(
@@ -439,4 +731,7 @@ pub fn host_game_plugin_fn(app: &mut App) {
 
     app.add_systems(OnEnter(HostState::Betting), on_enter_betting);
     app.add_systems(OnExit(HostState::Betting), on_exit_betting);
+
+    app.add_systems(OnEnter(HostState::Reviewing), on_enter_reviewing);
+    app.add_systems(OnExit(HostState::Reviewing), on_exit_reviewing);
 }

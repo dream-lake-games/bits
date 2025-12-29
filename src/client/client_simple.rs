@@ -56,9 +56,21 @@ fn handle_client_connected(trigger: On<Add, Connected>, mut commands: Commands) 
     ));
 }
 
+const MAX_QUEUED_INPUTS: usize = 8;
+
 #[derive(Debug, Clone, Resource, Default)]
 pub struct InputsQueue {
     pub queue: VecDeque<ClientInput>,
+}
+
+impl InputsQueue {
+    pub fn push(&mut self, input: ClientInput) {
+        if self.queue.len() >= MAX_QUEUED_INPUTS {
+            warn!("Input queue full, dropping input: {:?}", input);
+            return;
+        }
+        self.queue.push_back(input);
+    }
 }
 
 fn buffer_input(
