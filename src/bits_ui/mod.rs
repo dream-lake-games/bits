@@ -13,6 +13,7 @@ pub use text_simple::TextSimple;
 pub fn bits_ui_plugin_fn(app: &mut App) {
     app.add_plugins((
         button_simple::button_simple_plugin_fn,
+        flex_simple::flex_simple_plugin_fn,
         text_simple::text_simple_plugin_fn,
     ));
 }

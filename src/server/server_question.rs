@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 use bevy_http_client::prelude::*;
 use bits::prelude::*;
+use lightyear::prelude::*;
 use serde::Deserialize;
 
 #[derive(Deserialize, Debug, Clone, Default)]
@@ -21,6 +22,7 @@ fn start_generation_if_needed(
     {
         commands.spawn((
             Name::new("Question"),
+            Replicate::to_clients(NetworkTarget::All),
             Question::default(),
             QuestionGenerating,
         ));

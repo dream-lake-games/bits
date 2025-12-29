@@ -12,6 +12,15 @@ pub enum ClientConnectionState {
     Named { named: NamedPlayer },
 }
 
+#[derive(States, Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ClientGameState {
+    None,
+    WaitingForQuestion,
+    Guessing,
+    Betting,
+    Reviewing,
+}
+
 fn update_client_connection_state(
     connection_q: Query<(&LocalId,), With<Connected>>,
     player_info_q: Query<&PlayerInfo>,
@@ -54,8 +63,44 @@ fn update_client_connection_state(
     client_connection_state.set(new_state);
 }
 
+fn update_client_game_state(
+    client_connection_state: Res<State<ClientConnectionState>>,
+    mut client_game_state: ResMut<NextState<ClientGameState>>,
+    question_active: Query<Entity, With<QuestionActive>>,
+    bets_active: Query<Entity, With<BetsActive>>,
+    round_cap: Query<Entity, With<RoundCap>>,
+) {
+    if matches!(
+        client_connection_state.get(),
+        ClientConnectionState::Disconnected | ClientConnectionState::Unnamed
+    ) {
+        client_game_state.set(ClientGameState::None);
+        return;
+    }
+
+    let has_round_cap = !round_cap.is_empty();
+    let has_bets_active = !bets_active.is_empty();
+    let has_question_active = !question_active.is_empty();
+
+    let new_state = if has_round_cap {
+        ClientGameState::Reviewing
+    } else if has_bets_active && has_question_active {
+        ClientGameState::Betting
+    } else if has_question_active {
+        ClientGameState::Guessing
+    } else {
+        ClientGameState::WaitingForQuestion
+    };
+
+    client_game_state.set(new_state);
+}
+
 pub fn client_state_plugin_fn(app: &mut App) {
     app.insert_state(ClientConnectionState::Disconnected);
+    app.insert_state(ClientGameState::None);
 
-    app.add_systems(Update, update_client_connection_state);
+    app.add_systems(
+        FixedUpdate,
+        (update_client_connection_state, update_client_game_state),
+    );
 }

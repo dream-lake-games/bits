@@ -1,106 +1,146 @@
+use std::collections::HashSet;
+
 use bevy::prelude::*;
 use bits::prelude::*;
-use lightyear::prelude::*;
+use lightyear::prelude::{input::native::ActionState, server::ClientOf, *};
 
-use crate::server_state::ServerState;
+fn maintain_player_info(
+    mut player_info_q: Query<&mut PlayerInfo>,
+    connected_remotes_q: Query<
+        (&RemoteId, &ActionState<WrappedClientInput>),
+        (With<ClientOf>, With<Connected>),
+    >,
+) {
+    let mut player_info = player_info_q.single_mut().unwrap();
 
-#[derive(Component)]
-struct LobbyCleanup;
+    let connected_peer_id_set = connected_remotes_q
+        .iter()
+        .map(|r| r.0.0.clone())
+        .collect::<HashSet<_>>();
 
-fn connected_count_text(connected_q: Query<Entity, (With<LinkOf>, With<Connected>)>) -> String {
-    let num_connected = connected_q.iter().count();
-    format!("Connected: {}", num_connected)
-}
+    // 1. Remove bad peers (that arent' connected)
+    player_info.unnamed_players = player_info
+        .unnamed_players
+        .iter()
+        .cloned()
+        .filter(|unnamed| connected_peer_id_set.contains(&unnamed.peer_id))
+        .collect();
+    for ix in 0..player_info.named_players.len() {
+        if let Some(peer_id) = &player_info.named_players[ix].peer_id {
+            if connected_peer_id_set.contains(peer_id) {
+                continue;
+            }
+            player_info.named_players[ix].peer_id = None;
+        }
+    }
 
-fn player_list_text(player_info_q: Query<&PlayerInfo>) -> String {
-    let Ok(player_info) = player_info_q.single() else {
-        return "Players:\n(no player info)".to_string();
-    };
-
-    let mut lines = vec!["Players:".to_string()];
-
-    // Named players first
-    for named in &player_info.named_players {
-        let status = if named.peer_id.is_none() {
-            " [DISCONNECTED]"
-        } else {
-            ""
+    // 2. Name new peers
+    for pair in connected_remotes_q {
+        let Some(peer_id) = pair.1.peer_id.clone() else {
+            warn!("Client is sending messages without peer_id");
+            continue;
         };
-        lines.push(format!("  - {}{}", named.username, status));
+        let ClientInput::ClaimName { username } = pair.1.payload.clone() else {
+            continue;
+        };
+        if player_info
+            .named_players
+            .iter()
+            .any(|named| named.peer_id.is_some() && named.username == username)
+        {
+            warn!("Player trying to claim name that is actively in use");
+            continue;
+        }
+        if player_info
+            .named_players
+            .iter()
+            .any(|named| named.peer_id == Some(peer_id))
+        {
+            warn!("Active player trying to claim new name");
+            continue;
+        }
+        let unnamed_ix_opt = player_info
+            .unnamed_players
+            .iter()
+            .position(|unnamed| unnamed.peer_id == peer_id);
+        let Some(unnamed_ix) = unnamed_ix_opt else {
+            warn!("Player trying to claim name without firsting being seen as unnamed");
+            continue;
+        };
+        player_info.unnamed_players.remove(unnamed_ix);
+
+        let named_ix_opt = player_info
+            .named_players
+            .iter()
+            .position(|named| named.username == username);
+        match named_ix_opt {
+            Some(named_ix) => {
+                player_info.named_players[named_ix].peer_id = Some(peer_id);
+            }
+            None => {
+                player_info.named_players.push(NamedPlayer {
+                    username,
+                    peer_id: Some(peer_id),
+                });
+            }
+        }
     }
 
-    // Then unnamed players
-    for _ in &player_info.unnamed_players {
-        lines.push("  - (unnamed)".to_string());
+    // 3. Create new unnamed
+    for peer_id in &connected_peer_id_set {
+        if player_info
+            .unnamed_players
+            .iter()
+            .all(|unnamed| unnamed.peer_id != peer_id.clone())
+            && player_info
+                .named_players
+                .iter()
+                .all(|named| named.peer_id != Some(peer_id.clone()))
+        {
+            player_info.unnamed_players.push(UnnamedPlayer {
+                peer_id: peer_id.clone(),
+            });
+        }
     }
 
-    lines.join("\n")
-}
+    // 4. Check invariants
+    let all_peer_ids: Vec<_> = player_info
+        .unnamed_players
+        .iter()
+        .map(|u| &u.peer_id)
+        .chain(
+            player_info
+                .named_players
+                .iter()
+                .filter_map(|n| n.peer_id.as_ref()),
+        )
+        .collect();
+    assert!(
+        all_peer_ids.len() == all_peer_ids.iter().collect::<HashSet<_>>().len(),
+        "No peer id should appear twice across unnamed and named players"
+    );
 
-fn is_start_disabled(player_info_q: Query<&PlayerInfo>) -> bool {
-    let Ok(player_info) = player_info_q.single() else {
-        return true;
-    };
-
-    let connected_named_count = player_info
+    let all_usernames: Vec<_> = player_info
         .named_players
         .iter()
-        .filter(|named| named.peer_id.is_some())
-        .count();
+        .map(|n| &n.username)
+        .collect();
+    assert!(
+        all_usernames.len() == all_usernames.iter().collect::<HashSet<_>>().len(),
+        "No username should appear twice in named players"
+    );
 
-    connected_named_count < 2
-}
-
-fn on_enter_lobby(mut commands: Commands) {
-    commands.spawn((
-        FlexSimple::new().bundle(),
-        LobbyCleanup,
-        children![
-            TextSimple::p("")
-                .with_text_system(connected_count_text)
-                .bundle(),
-            Spacer::height(Val::Px(10.0)).bundle(),
-            TextSimple::p("")
-                .with_text_system(player_list_text)
-                .bundle(),
-            Spacer::height(Val::Px(20.0)).bundle(),
-            ButtonSimple::medium("START")
-                .with_on_release(start_game)
-                .with_disabled_system(is_start_disabled)
-                .bundle()
-        ],
-    ));
-}
-
-fn update_lobby(player_info_q: Query<&PlayerInfo>, mut commands: Commands) {
-    let Ok(player_info) = player_info_q.single() else {
-        return;
-    };
-    let num_fully_ready = player_info
+    let named_with_peer_count = player_info
         .named_players
         .iter()
-        .filter(|named| named.peer_id.is_some())
+        .filter(|n| n.peer_id.is_some())
         .count();
-    if num_fully_ready >= 2 {
-        commands.run_system_cached(start_game);
-    }
-}
-
-fn on_exit_lobby(cleanup_q: Query<Entity, With<LobbyCleanup>>, mut commands: Commands) {
-    for ent in &cleanup_q {
-        commands.entity(ent).despawn();
-    }
-}
-
-fn start_game(mut next_server_state: ResMut<NextState<ServerState>>) {
-    next_server_state.set(ServerState::InGame);
+    assert!(
+        connected_peer_id_set.len() == player_info.unnamed_players.len() + named_with_peer_count,
+        "Connected peers count should equal unnamed players + named players with peer_id"
+    );
 }
 
 pub fn server_lobby_plugin_fn(app: &mut App) {
-    app.add_systems(OnEnter(ServerState::Lobby), on_enter_lobby);
-    app.add_systems(
-        FixedUpdate,
-        (update_lobby,).chain().run_if(in_state(ServerState::Lobby)),
-    );
-    app.add_systems(OnExit(ServerState::Lobby), on_exit_lobby);
+    app.add_systems(FixedUpdate, maintain_player_info);
 }
