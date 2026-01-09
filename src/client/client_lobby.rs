@@ -255,12 +255,6 @@ fn on_enter_unnamed(mut commands: Commands) {
 }
 
 fn watch_submit(mut pending_name: Single<&mut PendingName>, mut inputs_queue: ResMut<InputsQueue>) {
-    // HACK: For testing clients which will auto-name
-    if let Ok(client_name) = std::env::var("CLIENT_NAME") {
-        pending_name.username = client_name;
-        pending_name.submit_pressed = true;
-    }
-
     if pending_name.submit_pressed && !pending_name.claim_sent {
         inputs_queue.push(ClientInput::ClaimName {
             username: pending_name.username.clone(),

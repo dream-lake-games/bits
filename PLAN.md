@@ -40,3 +40,11 @@ Don't need:
 
 - Brightness, reflexitvity
 - Layers should be handled separately
+
+## How to structure this thing?
+
+one option is to make it super generic, just have a position, list of pixel offsets, some floats to control the effect, then do it.
+
+^i kinda like this because then i could reuse it for other things besides just letters (button outlines, hover states, etc)
+
+then i could probably make text on top pretty simply by just having it some "on complete" call back that is called on the frame befoe we despawn stuff, and that should spawn the letter

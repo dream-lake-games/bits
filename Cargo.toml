@@ -11,11 +11,15 @@ path = "src/client/main.rs"
 name = "server"
 path = "src/server/main.rs"
 
+[[example]]
+name = "text"
+path = "examples/text/main.rs"
+
 [dependencies]
-bevy = "0.17.3"
+macros = { path = "macros" }
+bevy = { version = "0.17.3", features = ["track_location"] }
 bevy_egui = "0.38"
 bevy-inspector-egui = "0.35.0"
-bevy_http_client = "0.9.0"
 lightyear = { version = "0.25.5", features = [
     "netcode",
     "webtransport",
@@ -27,9 +31,20 @@ serde = { version = "1", default-features = false, features = [
     "derive",
 ] }
 rand = "0.8"
+anyhow = "1.0.100"
+async-openai = { version = "0.32", default-features = false, features = [
+    "responses",
+    "rustls",
+] }
+serde_json = "1.0.148"
+schemars = "0.8"
+reqwest = { version = "0.12", default-features = false, features = [
+    "json",
+    "rustls-tls",
+] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-tokio = { version = "1", features = ["fs", "rt"] }
+tokio = { version = "1", features = ["fs", "rt", "rt-multi-thread"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"

@@ -42,7 +42,13 @@ fn simple_client_startup(mut commands: Commands) -> Result<()> {
 
     commands.trigger(Connect { entity: client });
 
-    commands.spawn(Camera2d);
+    commands.spawn((
+        Camera2d,
+        Camera {
+            clear_color: ClearColorConfig::Custom(Color::BLACK),
+            ..default()
+        },
+    ));
 
     Ok(())
 }

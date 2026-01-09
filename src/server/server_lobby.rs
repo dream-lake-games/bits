@@ -26,11 +26,16 @@ fn maintain_player_info(
         .filter(|unnamed| connected_peer_id_set.contains(&unnamed.peer_id))
         .collect();
     for ix in 0..player_info.named_players.len() {
-        if let Some(peer_id) = &player_info.named_players[ix].peer_id {
-            if connected_peer_id_set.contains(peer_id) {
-                continue;
+        let named_player = &mut player_info.named_players[ix];
+        match &mut named_player.control {
+            PlayerControl::Human(human_control) => {
+                if let Some(peer_id) = human_control.peer_id {
+                    if !connected_peer_id_set.contains(&peer_id) {
+                        human_control.peer_id = None;
+                    }
+                }
             }
-            player_info.named_players[ix].peer_id = None;
+            _ => continue,
         }
     }
 
@@ -43,18 +48,20 @@ fn maintain_player_info(
         let ClientInput::ClaimName { username } = pair.1.payload.clone() else {
             continue;
         };
+        // Check if this username is already actively controlled by a human
         if player_info
             .named_players
             .iter()
-            .any(|named| named.peer_id.is_some() && named.username == username)
+            .any(|named| named.human_peer_id().is_some() && named.username == username)
         {
             warn!("Player trying to claim name that is actively in use");
             continue;
         }
+        // Check if this peer already controls a human player
         if player_info
             .named_players
             .iter()
-            .any(|named| named.peer_id == Some(peer_id))
+            .any(|named| named.is_human_with_peer(peer_id))
         {
             warn!("Active player trying to claim new name");
             continue;
@@ -69,18 +76,27 @@ fn maintain_player_info(
         };
         player_info.unnamed_players.remove(unnamed_ix);
 
+        // Find existing human player with this username (disconnected)
         let named_ix_opt = player_info
             .named_players
             .iter()
-            .position(|named| named.username == username);
+            .position(|named| named.is_human() && named.username == username);
         match named_ix_opt {
             Some(named_ix) => {
-                player_info.named_players[named_ix].peer_id = Some(peer_id);
+                // Reconnect to existing human player
+                if let PlayerControl::Human(human) =
+                    &mut player_info.named_players[named_ix].control
+                {
+                    human.peer_id = Some(peer_id);
+                }
             }
             None => {
+                // Create new human player
                 player_info.named_players.push(NamedPlayer {
                     username,
-                    peer_id: Some(peer_id),
+                    control: PlayerControl::Human(HumanControl {
+                        peer_id: Some(peer_id),
+                    }),
                 });
             }
         }
@@ -88,15 +104,15 @@ fn maintain_player_info(
 
     // 3. Create new unnamed
     for peer_id in &connected_peer_id_set {
-        if player_info
+        let is_unnamed = player_info
             .unnamed_players
             .iter()
-            .all(|unnamed| unnamed.peer_id != peer_id.clone())
-            && player_info
-                .named_players
-                .iter()
-                .all(|named| named.peer_id != Some(peer_id.clone()))
-        {
+            .any(|unnamed| unnamed.peer_id == *peer_id);
+        let is_named_human = player_info
+            .named_players
+            .iter()
+            .any(|named| named.is_human_with_peer(*peer_id));
+        if !is_unnamed && !is_named_human {
             player_info.unnamed_players.push(UnnamedPlayer {
                 peer_id: peer_id.clone(),
             });
@@ -107,12 +123,12 @@ fn maintain_player_info(
     let all_peer_ids: Vec<_> = player_info
         .unnamed_players
         .iter()
-        .map(|u| &u.peer_id)
+        .map(|u| u.peer_id)
         .chain(
             player_info
                 .named_players
                 .iter()
-                .filter_map(|n| n.peer_id.as_ref()),
+                .filter_map(|n| n.human_peer_id()),
         )
         .collect();
     assert!(
@@ -133,7 +149,7 @@ fn maintain_player_info(
     let named_with_peer_count = player_info
         .named_players
         .iter()
-        .filter(|n| n.peer_id.is_some())
+        .filter(|n| n.human_peer_id().is_some())
         .count();
     assert!(
         connected_peer_id_set.len() == player_info.unnamed_players.len() + named_with_peer_count,

@@ -9,6 +9,15 @@ use crate::{host::host_state::HostState, server_state::temporary_start_game};
 #[derive(Component)]
 struct LobbyCleanup;
 
+#[derive(Component)]
+struct AIRowsContainer;
+
+#[derive(Component)]
+struct AIRow;
+
+#[derive(Component)]
+struct AIRemoveMarker(String);
+
 fn connected_count_text(connected_q: Query<Entity, (With<LinkOf>, With<Connected>)>) -> String {
     let num_connected = connected_q.iter().count();
     format!("Connected: {}", num_connected)
@@ -24,10 +33,10 @@ fn player_list_text(player_info_q: Query<&PlayerInfo>) -> String {
     let mut named_players: Vec<_> = player_info.named_players.iter().collect();
     named_players.sort_by_key(|n| &n.username);
     for named in named_players {
-        let status = if named.peer_id.is_none() {
-            " [DISCONNECTED]"
-        } else {
-            ""
+        let status = match &named.control {
+            PlayerControl::Human(h) if h.peer_id.is_some() => "",
+            PlayerControl::Human(_) => " (disconnected)",
+            PlayerControl::AI(_) => " (AI)",
         };
         lines.push(format!("  - {}{}", named.username, status));
     }
@@ -47,46 +56,134 @@ fn is_start_disabled(player_info_q: Query<&PlayerInfo>) -> bool {
     let connected_named_count = player_info
         .named_players
         .iter()
-        .filter(|named| named.peer_id.is_some())
+        .filter(|named| match &named.control {
+            PlayerControl::Human(human_control) => human_control.peer_id.is_some(),
+            PlayerControl::AI(_) => true,
+        })
         .count();
 
     connected_named_count < 2
 }
 
-fn on_enter_lobby(mut commands: Commands) {
-    commands.spawn((
-        FlexSimple::new().bundle(),
-        LobbyCleanup,
-        children![
-            TextSimple::p("")
-                .with_text_system(connected_count_text)
-                .bundle(),
-            Spacer::height(Val::Px(10.0)).bundle(),
-            TextSimple::p("")
-                .with_text_system(player_list_text)
-                .bundle(),
-            Spacer::height(Val::Px(20.0)).bundle(),
-            ButtonSimple::medium("START")
-                .with_on_release(temporary_start_game)
-                .with_disabled_system(is_start_disabled)
-                .bundle()
-        ],
-    ));
+fn add_ai_player(mut player_info_q: Query<&mut PlayerInfo>) {
+    let Ok(mut player_info) = player_info_q.single_mut() else {
+        return;
+    };
+    let ai_count = player_info
+        .named_players
+        .iter()
+        .filter(|p| matches!(p.control, PlayerControl::AI(_)))
+        .count();
+    player_info.named_players.push(NamedPlayer {
+        username: format!("AI {}", ai_count + 1),
+        control: PlayerControl::AI(AIControl::Fermi(FermiControl {})),
+    });
 }
 
-fn update_lobby(player_info_q: Query<&PlayerInfo>, mut commands: Commands) {
+fn rebuild_ai_rows(
+    player_info_q: Query<&PlayerInfo>,
+    container_q: Query<Entity, With<AIRowsContainer>>,
+    existing_rows_q: Query<Entity, With<AIRow>>,
+    mut commands: Commands,
+) {
     let Ok(player_info) = player_info_q.single() else {
         return;
     };
-    let num_fully_ready = player_info
-        .named_players
-        .iter()
-        .filter(|named| named.peer_id.is_some())
-        .count();
-    // HACK: just auto start it
-    if num_fully_ready >= 2 {
-        commands.run_system_cached(temporary_start_game);
+    let Ok(container) = container_q.single() else {
+        return;
+    };
+
+    for row in &existing_rows_q {
+        commands.entity(row).despawn();
     }
+
+    for named in &player_info.named_players {
+        if !matches!(named.control, PlayerControl::AI(_)) {
+            continue;
+        }
+
+        let row = commands
+            .spawn((
+                AIRow,
+                FlexSimple::new()
+                    .with_direction(FlexDirection::Row)
+                    .with_size(Val::Auto, Val::Auto)
+                    .bundle(),
+            ))
+            .id();
+
+        let text = commands
+            .spawn(TextSimple::p(format!("{} ", named.username)).bundle())
+            .id();
+
+        let button = commands
+            .spawn((
+                ButtonSimple::small("X")
+                    .with_size(Val::Px(30.0), Val::Px(30.0))
+                    .bundle(),
+                AIRemoveMarker(named.username.clone()),
+            ))
+            .id();
+
+        commands.entity(row).add_children(&[text, button]);
+        commands.entity(container).add_child(row);
+    }
+}
+
+fn handle_ai_remove_clicks(
+    buttons_q: Query<(&AIRemoveMarker, &Interaction), Changed<Interaction>>,
+    mut player_info_q: Query<&mut PlayerInfo>,
+) {
+    for (marker, interaction) in &buttons_q {
+        if *interaction == Interaction::Pressed {
+            if let Ok(mut player_info) = player_info_q.single_mut() {
+                player_info.named_players.retain(|p| p.username != marker.0);
+            }
+        }
+    }
+}
+
+fn on_enter_lobby(mut commands: Commands) {
+    let ai_rows_container = commands
+        .spawn((
+            AIRowsContainer,
+            FlexSimple::new().with_size(Val::Auto, Val::Auto).bundle(),
+        ))
+        .id();
+
+    commands
+        .spawn((
+            FlexSimple::new().bundle(),
+            LobbyCleanup,
+            children![
+                TextSimple::p("")
+                    .with_text_system(connected_count_text)
+                    .bundle(),
+                Spacer::height(Val::Px(10.0)).bundle(),
+                TextSimple::p("")
+                    .with_text_system(player_list_text)
+                    .bundle(),
+                Spacer::height(Val::Px(10.0)).bundle(),
+                ButtonSimple::small("Add AI")
+                    .with_on_release(add_ai_player)
+                    .bundle(),
+                Spacer::height(Val::Px(10.0)).bundle(),
+            ],
+        ))
+        .add_child(ai_rows_container)
+        .with_children(|parent| {
+            parent.spawn((Spacer::height(Val::Px(10.0)).bundle(),));
+            parent.spawn((ButtonSimple::medium("START")
+                .with_on_release(temporary_start_game)
+                .with_disabled_system(is_start_disabled)
+                .bundle(),));
+        });
+}
+
+fn update_lobby(player_info_q: Query<&PlayerInfo>, mut _commands: Commands) {
+    let Ok(_player_info) = player_info_q.single() else {
+        return;
+    };
 }
 
 fn on_exit_lobby(cleanup_q: Query<Entity, With<LobbyCleanup>>, mut commands: Commands) {
@@ -143,11 +240,18 @@ fn on_exit_waiting_for_question(
 #[derive(Component)]
 struct GuessingCleanup;
 
+fn format_question_with_units(question: &Question) -> String {
+    match &question.units {
+        Some(units) => format!("{} (in {})", question.question, units),
+        None => question.question.clone(),
+    }
+}
+
 fn guessing_question_text(question_q: Query<&Question, With<QuestionActive>>) -> String {
     let Ok(question) = question_q.single() else {
         return "(no question)".to_string();
     };
-    question.question.clone()
+    format_question_with_units(question)
 }
 
 fn guessing_players_text(
@@ -263,7 +367,7 @@ struct BettingCleanup;
 fn betting_question_text(question_q: Query<&Question, With<QuestionActive>>) -> String {
     question_q
         .single()
-        .map(|q| q.question.clone())
+        .map(format_question_with_units)
         .unwrap_or("(no question)".to_string())
 }
 
@@ -437,7 +541,7 @@ struct ReviewingCleanup;
 fn reviewing_question_text(question_q: Query<&Question, With<QuestionActive>>) -> String {
     question_q
         .single()
-        .map(|q| q.question.clone())
+        .map(format_question_with_units)
         .unwrap_or("(no question)".to_string())
 }
 
@@ -582,21 +686,7 @@ fn reviewing_scores_text(game_state_q: Query<&GameState>, round_cap_q: Query<&Ro
     lines.join("\n")
 }
 
-fn on_enter_reviewing(mut commands: Commands, game_state_q: Query<&GameState>) {
-    // HACK: Log scores for testing
-    if let Ok(game_state) = game_state_q.single() {
-        let mut scores: Vec<_> = game_state.scores.iter().collect();
-        scores.sort_by(|a, b| b.1.cmp(a.1));
-        let score_strs: Vec<String> = scores
-            .iter()
-            .map(|(name, score)| format!("{}: {}", name, score))
-            .collect();
-        info!(
-            "mork - Round {} Scores: {}",
-            game_state.round,
-            score_strs.join(", ")
-        );
-    }
+fn on_enter_reviewing(mut commands: Commands) {
     commands.spawn((
         FlexSimple::new().bundle(),
         ReviewingCleanup,
@@ -710,10 +800,15 @@ fn on_exit_reviewing(cleanup_q: Query<Entity, With<ReviewingCleanup>>, mut comma
 }
 
 pub fn host_game_plugin_fn(app: &mut App) {
-    app.add_systems(OnEnter(HostState::Lobby), on_enter_lobby);
+    app.add_systems(
+        OnEnter(HostState::Lobby),
+        (on_enter_lobby, rebuild_ai_rows).chain(),
+    );
     app.add_systems(
         FixedUpdate,
-        (update_lobby,).chain().run_if(in_state(HostState::Lobby)),
+        (update_lobby, rebuild_ai_rows, handle_ai_remove_clicks)
+            .chain()
+            .run_if(in_state(HostState::Lobby)),
     );
     app.add_systems(OnExit(HostState::Lobby), on_exit_lobby);
 

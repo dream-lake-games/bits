@@ -4,6 +4,7 @@ use bevy::prelude::*;
 use bits::prelude::*;
 use lightyear::prelude::{input::native::ActionState, server::*, *};
 
+use crate::server_ai::{drive_ai_bets, drive_ai_guesses, drive_ai_vote_continue, spawn_ai_state};
 use crate::server_state::ServerState;
 
 #[derive(Component)]
@@ -221,42 +222,147 @@ fn maybe_make_active_question(
     }
 }
 
-fn process_guess_input(
-    mut active_question_q: Query<(&mut Question, &QuestionActive)>,
-    connected_remotes_q: Query<
+fn collect_human_inputs(
+    clients_q: Query<
         (&RemoteId, &ActionState<WrappedClientInput>),
         (With<ClientOf>, With<Connected>),
     >,
     player_info: Single<&PlayerInfo>,
+    mut input_queue: ResMut<GameInputQueue>,
 ) {
-    let Ok((mut question, active)) = active_question_q.single_mut() else {
-        return;
-    };
-    if active.guess_seconds_remaining.is_none() {
-        return;
-    }
-
-    for (_remote_id, action_state) in connected_remotes_q {
+    for (_remote_id, action_state) in clients_q.iter() {
         let Some(peer_id) = action_state.peer_id.clone() else {
-            warn!("Client is sending messages without peer_id");
             continue;
         };
-
-        let ClientInput::SubmitGuess { guess } = action_state.payload.clone() else {
-            continue;
-        };
-
-        let Some(username) = player_info.get_username_for_peer(peer_id) else {
-            warn!("Player trying to submit guess without being named");
-            continue;
-        };
-
-        if question.guesses.contains_key(&username) {
-            warn!("Player trying to submit guess when already submitted");
+        if matches!(
+            action_state.payload,
+            ClientInput::Noop | ClientInput::ClaimName { .. }
+        ) {
             continue;
         }
+        let Some(username) = player_info.get_username_for_peer(peer_id) else {
+            warn!("Player trying to submit game input without being named");
+            continue;
+        };
+        input_queue.queue.push(GameInput {
+            username,
+            input: action_state.payload.clone(),
+        });
+    }
+}
 
-        question.guesses.insert(username, guess);
+fn process_game_inputs(
+    mut input_queue: ResMut<GameInputQueue>,
+    game_state: Single<&GameState>,
+    mut question_q: Query<(&mut Question, &QuestionActive)>,
+    mut bets_q: Query<(&mut Bets, &mut BetsActive)>,
+    mut round_cap_q: Query<&mut RoundCap>,
+) {
+    for GameInput { username, input } in input_queue.queue.drain(..) {
+        match input {
+            ClientInput::Noop => {}
+
+            ClientInput::ClaimName { .. } => {
+                warn!("ClaimName should not go through process_game_inputs");
+            }
+
+            ClientInput::SubmitGuess { guess } => {
+                let Ok((mut question, active)) = question_q.single_mut() else {
+                    continue;
+                };
+                if active.guess_seconds_remaining.is_none() {
+                    continue;
+                }
+                if question.guesses.contains_key(&username) {
+                    warn!("Player trying to submit guess when already submitted");
+                    continue;
+                }
+                question.guesses.insert(username, guess);
+            }
+
+            ClientInput::LockBets => {
+                let Ok((_, mut bets_active)) = bets_q.single_mut() else {
+                    continue;
+                };
+                if bets_active.bets_seconds_remaining.is_none() {
+                    continue;
+                }
+                if bets_active.bets_locked.get(&username) == Some(&true) {
+                    warn!("Player trying to lock bets when already locked");
+                    continue;
+                }
+                bets_active.bets_locked.insert(username, true);
+            }
+
+            ClientInput::SubmitBet {
+                guess,
+                num_free,
+                num_paid,
+            } => {
+                if num_free == 0 && num_paid > 0 {
+                    warn!(
+                        "Player trying to submit invalid bet where num_free = 0 and num_paid = {num_paid}"
+                    );
+                    continue;
+                }
+
+                let Ok((question, question_active)) = question_q.single() else {
+                    continue;
+                };
+                if question_active.guess_seconds_remaining.is_some() {
+                    continue;
+                }
+
+                let Ok((mut bets, bets_active)) = bets_q.single_mut() else {
+                    continue;
+                };
+                if bets_active.bets_seconds_remaining.is_none() {
+                    continue;
+                }
+                if bets_active.bets_locked.get(&username) == Some(&true) {
+                    warn!("Player trying to submit bet after locking");
+                    continue;
+                }
+
+                let mut valid_guesses = question.guesses.values().cloned().collect::<HashSet<_>>();
+                valid_guesses.insert(0);
+                if !valid_guesses.contains(&guess) {
+                    warn!("Player trying to submit bet on invalid guess");
+                    continue;
+                }
+
+                let maybe_new_bets = bets.with_added_bet(
+                    guess,
+                    Bet {
+                        owner: username,
+                        num_free,
+                        num_paid,
+                    },
+                );
+                if let Err(reason) = maybe_new_bets.validate_bets(&game_state) {
+                    warn!(
+                        "Player tried to submit invalid bet based on current game state: {reason}"
+                    );
+                    continue;
+                }
+
+                *bets = maybe_new_bets;
+            }
+
+            ClientInput::VoteContinue => {
+                let Ok(mut round_cap) = round_cap_q.single_mut() else {
+                    continue;
+                };
+                if round_cap.seconds_until_auto_continue.is_none() {
+                    continue;
+                }
+                if round_cap.continue_locked.get(&username) == Some(&true) {
+                    warn!("Player trying to vote continue when already voted");
+                    continue;
+                }
+                round_cap.continue_locked.insert(username, true);
+            }
+        }
     }
 }
 
@@ -337,110 +443,6 @@ fn maybe_make_active_bets(
             bets_locked,
         },
     ));
-}
-
-fn process_bet_input(
-    game_state: Single<&GameState>,
-    player_info: Single<&PlayerInfo>,
-    connected_remotes_q: Query<
-        (&RemoteId, &ActionState<WrappedClientInput>),
-        (With<ClientOf>, With<Connected>),
-    >,
-    active_question_q: Query<(&Question, &QuestionActive)>,
-    mut active_bets_q: Query<(&mut Bets, &mut BetsActive)>,
-    round_cap: Query<&RoundCap>,
-) {
-    if !round_cap.is_empty() {
-        return;
-    }
-
-    let Ok((question, question_active)) = active_question_q.single() else {
-        return;
-    };
-    if question_active.guess_seconds_remaining.is_some() {
-        return;
-    }
-
-    let Ok((mut bets, mut bets_active)) = active_bets_q.single_mut() else {
-        return;
-    };
-    bets.validate_bets(&game_state)
-        .expect("Bets must be valid at the start of process_bet_input");
-
-    if bets_active.bets_seconds_remaining.is_none() {
-        return;
-    }
-
-    for (_remote_id, action_state) in connected_remotes_q {
-        let Some(peer_id) = action_state.peer_id.clone() else {
-            warn!("Client is sending messages without peer_id");
-            continue;
-        };
-
-        // Handle LockBets input
-        if matches!(action_state.payload, ClientInput::LockBets) {
-            let Some(username) = player_info.get_username_for_peer(peer_id) else {
-                warn!("Player trying to lock bets without being named");
-                continue;
-            };
-
-            if bets_active.bets_locked.get(&username) == Some(&true) {
-                warn!("Player trying to lock bets when already locked");
-                continue;
-            }
-
-            bets_active.bets_locked.insert(username, true);
-            continue;
-        }
-
-        let ClientInput::SubmitBet {
-            guess,
-            num_free,
-            num_paid,
-        } = action_state.payload.clone()
-        else {
-            continue;
-        };
-
-        if num_free == 0 && num_paid > 0 {
-            warn!(
-                "Player trying to submit invalid bet where num_free = 0 and num_paid = {num_paid}"
-            );
-            continue;
-        }
-
-        let Some(username) = player_info.get_username_for_peer(peer_id) else {
-            warn!("Player trying to submit bet without being named");
-            continue;
-        };
-
-        if bets_active.bets_locked.get(&username) == Some(&true) {
-            warn!("Player trying to submit bet after locking");
-            continue;
-        }
-
-        let mut valid_guesses = question.guesses.values().cloned().collect::<HashSet<_>>();
-        valid_guesses.insert(0); // 0 is always valid (lowball everybody)
-        if !valid_guesses.contains(&guess) {
-            warn!("Player trying to submit bet on invalid guess");
-            continue;
-        }
-
-        let maybe_new_bets = bets.with_added_bet(
-            guess,
-            Bet {
-                owner: username,
-                num_free,
-                num_paid,
-            },
-        );
-        if let Err(reason) = maybe_new_bets.validate_bets(&game_state) {
-            warn!("Player tried to submit invalid bet based on current game state: {reason}");
-            continue;
-        }
-
-        *bets = maybe_new_bets;
-    }
 }
 
 fn finish_betting(
@@ -552,46 +554,6 @@ fn maybe_make_round_cap(
     ));
 }
 
-fn process_round_cap_input(
-    player_info: Single<&PlayerInfo>,
-    connected_remotes_q: Query<
-        (&RemoteId, &ActionState<WrappedClientInput>),
-        (With<ClientOf>, With<Connected>),
-    >,
-    mut round_cap_q: Query<&mut RoundCap>,
-) {
-    let Ok(mut round_cap) = round_cap_q.single_mut() else {
-        return;
-    };
-
-    if round_cap.seconds_until_auto_continue.is_none() {
-        return;
-    }
-
-    for (_remote_id, action_state) in connected_remotes_q {
-        let Some(peer_id) = action_state.peer_id.clone() else {
-            warn!("Client is sending messages without peer_id");
-            continue;
-        };
-
-        if !matches!(action_state.payload, ClientInput::VoteContinue) {
-            continue;
-        }
-
-        let Some(username) = player_info.get_username_for_peer(peer_id) else {
-            warn!("Player trying to vote continue without being named");
-            continue;
-        };
-
-        if round_cap.continue_locked.get(&username) == Some(&true) {
-            warn!("Player trying to vote continue when already voted");
-            continue;
-        }
-
-        round_cap.continue_locked.insert(username, true);
-    }
-}
-
 fn finish_round_cap(
     mut round_cap_q: Query<&mut RoundCap>,
     player_info_q: Query<&PlayerInfo>,
@@ -654,6 +616,7 @@ fn maybe_progress_round(
 }
 
 pub fn server_game_plugin_fn(app: &mut App) {
+    app.init_resource::<GameInputQueue>();
     app.add_systems(OnEnter(ServerState::InGame), on_enter_ingame);
     app.add_systems(
         FixedUpdate,
@@ -662,13 +625,16 @@ pub fn server_game_plugin_fn(app: &mut App) {
             update_question_names,
             update_bets_names,
             maybe_make_active_question,
-            process_guess_input,
+            spawn_ai_state,
+            collect_human_inputs,
+            drive_ai_guesses,
+            drive_ai_bets,
+            drive_ai_vote_continue,
+            process_game_inputs,
             finish_guessing,
             maybe_make_active_bets,
-            process_bet_input,
             finish_betting,
             maybe_make_round_cap,
-            process_round_cap_input,
             finish_round_cap,
             maybe_progress_round,
         )

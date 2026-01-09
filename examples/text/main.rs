@@ -2,13 +2,32 @@ use bevy::input::common_conditions::input_toggle_active;
 use bevy::prelude::*;
 use bevy_inspector_egui::bevy_egui::EguiPlugin;
 use bits::prelude::*;
-use bits::protocol::ProtocolPlugin;
 use bits::window::get_window_plugin_with_title;
 
-mod client_game;
-mod client_lobby;
-mod client_simple;
-mod client_state;
+fn startup(mut commands: Commands) {
+    commands.spawn((
+        Camera2d,
+        Camera {
+            clear_color: ClearColorConfig::Custom(Color::BLACK),
+            ..default()
+        },
+    ));
+
+    commands.spawn((
+        Name::new("Assemble"),
+        Assemble::new()
+            .with_assemblable::<PlayerPixels>()
+            .with_lifespan(0.5),
+        Transform::default(),
+        Visibility::Inherited,
+    ));
+}
+
+#[derive(Assemblable)]
+#[file("assets/play/letters.aseprite")]
+#[tag("a")]
+#[exclude_prefix("_")]
+struct PlayerPixels;
 
 fn main() {
     let mut app = App::new();
@@ -23,14 +42,9 @@ fn main() {
                 .run_if(input_toggle_active(false, KeyCode::Tab)),
         );
 
-    app.add_plugins((
-        ProtocolPlugin,
-        bits_ui_plugin_fn,
-        client_game::client_game_plugin_fn,
-        client_lobby::client_lobby_plugin_fn,
-        client_simple::client_simple_plugin_fn,
-        client_state::client_state_plugin_fn,
-    ));
+    app.add_plugins((bits_ui_plugin_fn,));
+
+    app.add_systems(Startup, startup);
 
     app.run();
 }

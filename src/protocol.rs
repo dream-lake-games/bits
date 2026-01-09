@@ -1,10 +1,38 @@
 use std::collections::HashMap;
 
+use crate::prelude::*;
 use bevy::{ecs::entity::MapEntities, prelude::*};
 use lightyear::prelude::*;
 use serde::{Deserialize, Serialize};
 
 pub type Username = String;
+
+#[derive(Debug, Clone, Serialize, Deserialize, Reflect, PartialEq, Eq, Default)]
+pub struct Source {
+    pub url: String,
+    pub title: Option<String>,
+    pub snippet: Option<String>,
+}
+
+impl Source {
+    pub fn new(url: impl Into<String>) -> Self {
+        Self {
+            url: url.into(),
+            title: None,
+            snippet: None,
+        }
+    }
+
+    pub fn with_title(mut self, title: impl Into<String>) -> Self {
+        self.title = Some(title.into());
+        self
+    }
+
+    pub fn with_snippet(mut self, snippet: impl Into<String>) -> Self {
+        self.snippet = Some(snippet.into());
+        self
+    }
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone, Reflect, Default, PartialEq)]
 pub enum ClientInput {
@@ -31,15 +59,64 @@ pub struct WrappedClientInput {
     pub payload: ClientInput,
 }
 
+/// Input for game systems, decoupled from network peer_id.
+/// Can be triggered by human players (via network) or AI players (via server).
+#[derive(Debug, Clone)]
+pub struct GameInput {
+    pub username: Username,
+    pub input: ClientInput,
+}
+
+#[derive(Resource, Debug, Default)]
+pub struct GameInputQueue {
+    pub queue: Vec<GameInput>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Reflect, PartialEq)]
 pub struct UnnamedPlayer {
     pub peer_id: PeerId,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Reflect, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Serialize, Deserialize, Reflect, PartialEq, Eq)]
+pub struct HumanControl {
+    pub peer_id: Option<PeerId>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Reflect, PartialEq, Eq)]
+pub enum AIControl {
+    Fermi(FermiControl),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Reflect, PartialEq, Eq)]
+pub enum PlayerControl {
+    Human(HumanControl),
+    AI(AIControl),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Reflect, PartialEq, Eq)]
 pub struct NamedPlayer {
     pub username: Username,
-    pub peer_id: Option<PeerId>,
+    pub control: PlayerControl,
+}
+
+impl NamedPlayer {
+    /// Returns the peer_id if this is a human-controlled player, None otherwise
+    pub fn human_peer_id(&self) -> Option<PeerId> {
+        match &self.control {
+            PlayerControl::Human(human) => human.peer_id,
+            PlayerControl::AI(_) => None,
+        }
+    }
+
+    /// Returns true if this is a human player with the given peer_id
+    pub fn is_human_with_peer(&self, peer_id: PeerId) -> bool {
+        self.human_peer_id() == Some(peer_id)
+    }
+
+    /// Returns true if this is a human player (regardless of connection status)
+    pub fn is_human(&self) -> bool {
+        matches!(self.control, PlayerControl::Human(_))
+    }
 }
 
 #[derive(Component, Debug, Clone, Serialize, Deserialize, Reflect, PartialEq, Default)]
@@ -58,8 +135,12 @@ impl PlayerInfo {
     pub fn get_username_for_peer(&self, peer_id: PeerId) -> Option<Username> {
         self.named_players
             .iter()
-            .find(|named| named.peer_id == Some(peer_id))
-            .map(|named| named.username.clone())
+            .find_map(|named| match &named.control {
+                PlayerControl::Human(human_control) if human_control.peer_id == Some(peer_id) => {
+                    Some(named.username.clone())
+                }
+                _ => None,
+            })
     }
 }
 
@@ -68,7 +149,9 @@ pub struct Question {
     pub round: Option<u32>,
     pub question: String,
     pub answer: u32,
+    pub units: Option<String>,
     pub guesses: HashMap<Username, u32>,
+    pub sources: Vec<Source>,
 }
 
 #[derive(Component, Debug, Clone, Serialize, Deserialize, Reflect, PartialEq)]

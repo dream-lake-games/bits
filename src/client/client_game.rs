@@ -2,7 +2,6 @@ use std::time::Duration;
 
 use bevy::prelude::*;
 use bits::prelude::*;
-use rand::Rng;
 
 use crate::{
     client_simple::InputsQueue,
@@ -148,9 +147,9 @@ fn on_enter_guessing(mut commands: Commands) {
             .with_visibility_system(
                 |connection_state: Res<State<ClientConnectionState>>,
                  question_q: Query<&Question, With<QuestionActive>>| {
-                    if let ClientConnectionState::Named { named } = connection_state.get() {
+                    if let ClientConnectionState::Named { username } = connection_state.get() {
                         if let Ok(question) = question_q.single() {
-                            return !question.guesses.contains_key(&named.username);
+                            return !question.guesses.contains_key(username);
                         }
                     }
                     true
@@ -270,9 +269,9 @@ fn on_enter_guessing(mut commands: Commands) {
             .with_visibility_system(
                 |connection_state: Res<State<ClientConnectionState>>,
                  question_q: Query<&Question, With<QuestionActive>>| {
-                    if let ClientConnectionState::Named { named } = connection_state.get() {
+                    if let ClientConnectionState::Named { username } = connection_state.get() {
                         if let Ok(question) = question_q.single() {
-                            return question.guesses.contains_key(&named.username);
+                            return question.guesses.contains_key(username);
                         }
                     }
                     false
@@ -288,9 +287,9 @@ fn on_enter_guessing(mut commands: Commands) {
                 .with_text_system(
                     |connection_state: Res<State<ClientConnectionState>>,
                      question_q: Query<&Question, With<QuestionActive>>| {
-                        if let ClientConnectionState::Named { named } = connection_state.get() {
+                        if let ClientConnectionState::Named { username } = connection_state.get() {
                             if let Ok(question) = question_q.single() {
-                                if let Some(&guess) = question.guesses.get(&named.username) {
+                                if let Some(&guess) = question.guesses.get(username) {
                                     return format!("Submitted: {}", guess);
                                 }
                             }
@@ -307,10 +306,10 @@ fn on_enter_guessing(mut commands: Commands) {
             .with_visibility_system(
                 |connection_state: Res<State<ClientConnectionState>>,
                  question_q: Query<(&Question, &QuestionActive)>| {
-                    if let ClientConnectionState::Named { named } = connection_state.get() {
+                    if let ClientConnectionState::Named { username } = connection_state.get() {
                         if let Ok((question, active)) = question_q.single() {
                             return active.guess_seconds_remaining.is_none()
-                                && !question.guesses.contains_key(&named.username);
+                                && !question.guesses.contains_key(username);
                         }
                     }
                     false
@@ -327,25 +326,7 @@ fn on_enter_guessing(mut commands: Commands) {
     ));
 }
 
-fn update_guessing(
-    mut pending_guess: Single<&mut PendingGuess>,
-    connection_state: Res<State<ClientConnectionState>>,
-    question_q: Query<&Question, With<QuestionActive>>,
-    mut commands: Commands,
-) {
-    // HACK: Auto-submit guess if we haven't yet
-    let ClientConnectionState::Named { named } = connection_state.get() else {
-        return;
-    };
-    let Ok(question) = question_q.single() else {
-        return;
-    };
-    if question.guesses.contains_key(&named.username) {
-        return;
-    }
-    pending_guess.current_number = rand::thread_rng().gen_range(1..=100).to_string();
-    commands.run_system_cached(handle_submit_guess);
-}
+fn update_guessing() {}
 
 fn on_exit_guessing(cleanup_q: Query<Entity, With<GuessingCleanup>>, mut commands: Commands) {
     for ent in &cleanup_q {
@@ -356,10 +337,17 @@ fn on_exit_guessing(cleanup_q: Query<Entity, With<GuessingCleanup>>, mut command
 #[derive(Component)]
 struct BettingCleanup;
 
+fn format_question_with_units(question: &Question) -> String {
+    match &question.units {
+        Some(units) => format!("{} (in {})", question.question, units),
+        None => question.question.clone(),
+    }
+}
+
 fn betting_question_text(question_q: Query<&Question, With<QuestionActive>>) -> String {
     question_q
         .single()
-        .map(|q| q.question.clone())
+        .map(format_question_with_units)
         .unwrap_or("(no question)".to_string())
 }
 
@@ -412,11 +400,11 @@ fn on_enter_betting(
     question_q: Query<&Question, With<QuestionActive>>,
     connection_state: Res<State<ClientConnectionState>>,
 ) {
-    let ClientConnectionState::Named { named } = connection_state.get() else {
+    let ClientConnectionState::Named { username } = connection_state.get() else {
         warn!("Client not named when entering betting");
         return;
     };
-    let current_username = named.username.clone();
+    let current_username = username.clone();
 
     let Ok(question) = question_q.single() else {
         warn!("No active question when entering betting");
@@ -807,56 +795,7 @@ fn on_enter_betting(
         });
 }
 
-fn has_any_bets(bets: &Bets, username: &str) -> bool {
-    bets.bets
-        .values()
-        .flat_map(|bet_list| bet_list.iter())
-        .any(|b| b.owner == username)
-}
-
-fn update_betting(
-    connection_state: Res<State<ClientConnectionState>>,
-    bets_q: Query<(&Bets, &BetsActive)>,
-    question_q: Query<&Question, With<QuestionActive>>,
-    game_state_q: Query<&GameState>,
-    mut inputs_queue: ResMut<InputsQueue>,
-) {
-    // HACK: Auto-bet and lock for testing
-    let ClientConnectionState::Named { named } = connection_state.get() else {
-        return;
-    };
-    let Ok((bets, bets_active)) = bets_q.single() else {
-        return;
-    };
-
-    if !has_any_bets(bets, &named.username) {
-        let Ok(question) = question_q.single() else {
-            return;
-        };
-        let Ok(game_state) = game_state_q.single() else {
-            return;
-        };
-        let mut possible_guesses: Vec<u32> = question.guesses.values().cloned().collect();
-        possible_guesses.push(0);
-        possible_guesses.sort();
-        possible_guesses.dedup();
-
-        let chosen_guess =
-            possible_guesses[rand::thread_rng().gen_range(0..possible_guesses.len())];
-        let score = game_state.scores.get(&named.username).copied().unwrap_or(0);
-        let num_paid = rand::thread_rng().gen_range(0..=score);
-
-        inputs_queue.push(ClientInput::SubmitBet {
-            guess: chosen_guess,
-            num_free: 2,
-            num_paid,
-        });
-    }
-
-    if !is_user_locked(bets_active, &named.username) {
-        inputs_queue.push(ClientInput::LockBets);
-    }
-}
+fn update_betting() {}
 
 fn on_exit_betting(cleanup_q: Query<Entity, With<BettingCleanup>>, mut commands: Commands) {
     for ent in &cleanup_q {
@@ -876,11 +815,11 @@ fn is_user_continue_locked(round_cap: &RoundCap, username: &str) -> bool {
 }
 
 fn on_enter_reviewing(mut commands: Commands, connection_state: Res<State<ClientConnectionState>>) {
-    let ClientConnectionState::Named { named } = connection_state.get() else {
+    let ClientConnectionState::Named { username } = connection_state.get() else {
         warn!("Client not named when entering reviewing");
         return;
     };
-    let current_username = named.username.clone();
+    let current_username = username.clone();
 
     let username_for_delta = current_username.clone();
     let username_for_disabled = current_username.clone();
@@ -933,21 +872,10 @@ fn on_enter_reviewing(mut commands: Commands, connection_state: Res<State<Client
 }
 
 fn update_reviewing(
-    connection_state: Res<State<ClientConnectionState>>,
-    round_cap_q: Query<&RoundCap>,
-    mut inputs_queue: ResMut<InputsQueue>,
+    _connection_state: Res<State<ClientConnectionState>>,
+    _round_cap_q: Query<&RoundCap>,
+    _inputs_queue: ResMut<InputsQueue>,
 ) {
-    // HACK: Auto-continue for testing
-    let ClientConnectionState::Named { named } = connection_state.get() else {
-        return;
-    };
-    let Ok(round_cap) = round_cap_q.single() else {
-        return;
-    };
-    if is_user_continue_locked(round_cap, &named.username) {
-        return;
-    }
-    inputs_queue.push(ClientInput::VoteContinue);
 }
 
 fn on_exit_reviewing(cleanup_q: Query<Entity, With<ReviewingCleanup>>, mut commands: Commands) {

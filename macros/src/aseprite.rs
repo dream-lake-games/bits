@@ -8,10 +8,14 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
+    if !std::path::Path::new(ASEPRITE_BIN).exists() {
+        anyhow::bail!("Aseprite not found at: {}", ASEPRITE_BIN);
+    }
+
     let output = Command::new(ASEPRITE_BIN)
         .args(args)
         .output()
-        .context("Failed to execute Aseprite command")?;
+        .with_context(|| format!("Failed to execute Aseprite at: {}", ASEPRITE_BIN))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -27,111 +31,66 @@ where
     Ok(stdout.into())
 }
 
-fn list_tags(file: &str) -> Result<Vec<String>> {
-    let output = run_aseprite_cmd(["-b", "--list-tags", file])?;
-    Ok(output
-        .split_whitespace()
-        .into_iter()
-        .map(|s| s.to_string())
-        .collect())
-}
-
 fn list_layers(file: &str) -> Result<Vec<String>> {
     let output = run_aseprite_cmd(["-b", "--list-layers", file])?;
     Ok(output.lines().map(|s| s.to_string()).collect())
 }
 
-#[allow(dead_code)]
-pub(crate) fn check_if_file_has_tag(file: &str, tag: &str) -> Result<bool> {
-    Ok(list_tags(file)?.iter().any(|check_tag| check_tag == tag))
+pub fn list_tags(file: &str) -> Result<Vec<String>> {
+    let output = run_aseprite_cmd(["-b", "--list-tags", file])?;
+    Ok(output.split_whitespace().map(|s| s.to_string()).collect())
 }
 
-pub(crate) struct ExportBuilder {
+pub fn validate_tag(file: &str, tag: &str) -> Result<()> {
+    let tags = list_tags(file)?;
+    if !tags.iter().any(|t| t == tag) {
+        anyhow::bail!(
+            "Tag '{}' not found in '{}'. Available tags: {:?}",
+            tag,
+            file,
+            tags
+        );
+    }
+    Ok(())
+}
+
+pub struct ExportBuilder {
     file: String,
     tag: String,
-    include_prefixes: Vec<String>,
     exclude_prefixes: Vec<String>,
 }
 
 impl ExportBuilder {
-    pub(crate) fn new(file: impl Into<String>, tag: impl Into<String>) -> Self {
+    pub fn new(file: impl Into<String>, tag: impl Into<String>) -> Self {
         Self {
             file: file.into(),
             tag: tag.into(),
-            include_prefixes: Vec::new(),
             exclude_prefixes: Vec::new(),
         }
     }
 
-    pub(crate) fn get_generated_folder(file: &str) -> Result<String> {
-        if !file.ends_with(".aseprite") {
-            anyhow::bail!("File must end with .aseprite: {}", file);
-        }
-
-        let parts: Vec<&str> = file.split('/').collect();
-        let assets_index = parts
-            .iter()
-            .rposition(|&part| part == "assets")
-            .ok_or_else(|| {
-                anyhow::anyhow!("File path must contain 'assets' component: {}", file)
-            })?;
-
-        let mut result_parts = parts[..=assets_index].to_vec();
-        result_parts.push("_generated");
-        result_parts.push("aseprite");
-        result_parts.extend_from_slice(&parts[assets_index + 1..]);
-
-        Ok(format!("{}/", result_parts.join("/")))
-    }
-
-    pub(crate) fn get_data_file(file: &str, tag: &str) -> Result<String> {
-        let folder = Self::get_generated_folder(file)?;
-        Ok(format!("{}{}_data.json", folder, tag))
-    }
-
-    pub(crate) fn get_sprite_file(file: &str, tag: &str) -> Result<String> {
-        let folder = Self::get_generated_folder(file)?;
-        Ok(format!("{}{}_sprite.png", folder, tag))
-    }
-
-    pub(crate) fn include_prefix(mut self, prefix: impl Into<String>) -> Self {
-        self.include_prefixes.push(prefix.into());
-        self
-    }
-
-    pub(crate) fn exclude_prefix(mut self, prefix: impl Into<String>) -> Self {
+    pub fn exclude_prefix(mut self, prefix: impl Into<String>) -> Self {
         self.exclude_prefixes.push(prefix.into());
         self
     }
 
-    pub(crate) fn export(self) -> Result<()> {
-        let output_data = Self::get_data_file(&self.file, &self.tag)?;
-        let output_sheet = Self::get_sprite_file(&self.file, &self.tag)?;
-
+    fn get_layers_to_ignore(&self) -> Result<Vec<String>> {
         let all_layers = list_layers(&self.file)?;
-        let layers_to_ignore: Vec<String> = all_layers
-            .iter()
+        Ok(all_layers
+            .into_iter()
             .filter(|layer| {
-                let should_include = if self.include_prefixes.is_empty() {
-                    true
-                } else {
-                    self.include_prefixes
-                        .iter()
-                        .any(|prefix| layer.starts_with(prefix))
-                };
-
-                let should_exclude = self
-                    .exclude_prefixes
+                self.exclude_prefixes
                     .iter()
-                    .any(|prefix| layer.starts_with(prefix));
-
-                !should_include || should_exclude
+                    .any(|prefix| layer.starts_with(prefix))
             })
-            .cloned()
-            .collect();
+            .collect())
+    }
+
+    pub fn export_to_file(self, output_path: &str) -> Result<()> {
+        let layers_to_ignore = self.get_layers_to_ignore()?;
 
         let mut args = vec!["-b".to_string()];
-
+        args.push(self.file.clone());
         args.push("--tag".to_string());
         args.push(self.tag.clone());
 
@@ -140,17 +99,148 @@ impl ExportBuilder {
             args.push(layer);
         }
 
-        args.push("--list-layers".to_string());
-        args.push("--sheet".to_string());
-        args.push(output_sheet);
-        args.push("--data".to_string());
-        args.push(output_data);
-        args.push("--format".to_string());
-        args.push("json-array".to_string());
+        args.push("--frame-range".to_string());
+        args.push("0,0".to_string());
+        args.push("--save-as".to_string());
+        args.push(output_path.to_string());
+
+        run_aseprite_cmd(args.iter().map(|s| s.as_str()))?;
+
+        if !std::path::Path::new(output_path).exists() {
+            anyhow::bail!(
+                "Aseprite export did not create output file.\nArgs: {:?}",
+                args
+            );
+        }
+
+        Ok(())
+    }
+
+    pub fn export_sprite_sheet(self, output_path: &str) -> Result<AnimExportInfo> {
+        let layers_to_ignore = self.get_layers_to_ignore()?;
+
+        let (frame_from, frame_to) = get_tag_frame_range(&self.file, &self.tag)?;
+
+        let temp_dir = std::env::temp_dir();
+        let temp_json = temp_dir.join(format!(
+            "anim_sheet_{}_{}.json",
+            self.file.replace(['/', '\\', '.'], "_"),
+            self.tag
+        ));
+
+        let mut args = vec!["-b".to_string()];
+        args.push("--frame-range".to_string());
+        args.push(format!("{},{}", frame_from, frame_to));
+
+        for layer in &layers_to_ignore {
+            args.push("--ignore-layer".to_string());
+            args.push(layer.clone());
+        }
 
         args.push(self.file.clone());
 
-        run_aseprite_cmd(args)?;
-        Ok(())
+        args.push("--sheet".to_string());
+        args.push(output_path.to_string());
+        args.push("--sheet-type".to_string());
+        args.push("horizontal".to_string());
+        args.push("--data".to_string());
+        args.push(temp_json.to_str().unwrap().to_string());
+        args.push("--format".to_string());
+        args.push("json-array".to_string());
+
+        run_aseprite_cmd(args.iter().map(|s| s.as_str()))?;
+
+        if !std::path::Path::new(output_path).exists() {
+            anyhow::bail!(
+                "Aseprite sprite sheet export did not create output file.\nArgs: {:?}",
+                args
+            );
+        }
+
+        let json_content = std::fs::read_to_string(&temp_json)
+            .with_context(|| format!("Failed to read temp json: {}", temp_json.display()))?;
+        let _ = std::fs::remove_file(&temp_json);
+
+        let json: serde_json::Value = serde_json::from_str(&json_content)
+            .with_context(|| "Failed to parse aseprite JSON output")?;
+
+        let frames = json["frames"]
+            .as_array()
+            .ok_or_else(|| anyhow::anyhow!("No frames array in JSON"))?;
+
+        let frame_count = frames.len();
+        if frame_count == 0 {
+            anyhow::bail!("Tag '{}' has no frames in sprite sheet", self.tag);
+        }
+
+        let first_frame = &frames[0];
+        let frame_width = first_frame["sourceSize"]["w"]
+            .as_u64()
+            .ok_or_else(|| anyhow::anyhow!("Missing frame width"))?
+            as u32;
+        let frame_height = first_frame["sourceSize"]["h"]
+            .as_u64()
+            .ok_or_else(|| anyhow::anyhow!("Missing frame height"))?
+            as u32;
+
+        Ok(AnimExportInfo {
+            frame_count,
+            frame_width,
+            frame_height,
+        })
     }
+}
+
+#[derive(Debug)]
+pub struct AnimExportInfo {
+    pub frame_count: usize,
+    pub frame_width: u32,
+    pub frame_height: u32,
+}
+
+fn get_tag_frame_range(file: &str, tag: &str) -> Result<(u32, u32)> {
+    let temp_dir = std::env::temp_dir();
+    let temp_json = temp_dir.join(format!(
+        "tag_meta_{}.json",
+        file.replace(['/', '\\', '.'], "_")
+    ));
+
+    let args = vec![
+        "-b",
+        file,
+        "--list-tags",
+        "--data",
+        temp_json.to_str().unwrap(),
+        "--format",
+        "json-array",
+    ];
+
+    run_aseprite_cmd(args)?;
+
+    let json_content = std::fs::read_to_string(&temp_json)
+        .with_context(|| format!("Failed to read temp json: {}", temp_json.display()))?;
+    let _ = std::fs::remove_file(&temp_json);
+
+    let json: serde_json::Value = serde_json::from_str(&json_content)
+        .with_context(|| "Failed to parse aseprite JSON output")?;
+
+    let frame_tags = json["meta"]["frameTags"]
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("No frameTags in metadata"))?;
+
+    for frame_tag in frame_tags {
+        let name = frame_tag["name"].as_str().unwrap_or("");
+        if name == tag {
+            let from = frame_tag["from"]
+                .as_u64()
+                .ok_or_else(|| anyhow::anyhow!("Missing 'from' in tag"))?
+                as u32;
+            let to = frame_tag["to"]
+                .as_u64()
+                .ok_or_else(|| anyhow::anyhow!("Missing 'to' in tag"))? as u32;
+            return Ok((from, to));
+        }
+    }
+
+    anyhow::bail!("Tag '{}' not found in frameTags metadata", tag)
 }

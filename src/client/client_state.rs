@@ -7,9 +7,10 @@ use lightyear::prelude::*;
 
 #[derive(States, Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ClientConnectionState {
+    None,
     Disconnected,
     Unnamed,
-    Named { named: NamedPlayer },
+    Named { username: Username },
 }
 
 #[derive(States, Debug, Clone, PartialEq, Eq, Hash)]
@@ -45,7 +46,7 @@ fn update_client_connection_state(
     let named_opt = player_info
         .named_players
         .iter()
-        .find(|named| named.peer_id == Some(peer_id));
+        .find(|named| named.is_human_with_peer(peer_id));
 
     let new_state = match (is_unnamed, named_opt) {
         (true, Some(_)) => panic!("A single client peer_id should never be both unnamed and named"),
@@ -57,7 +58,7 @@ fn update_client_connection_state(
         }
         (true, None) => ClientConnectionState::Unnamed,
         (false, Some(named)) => ClientConnectionState::Named {
-            named: named.clone(),
+            username: named.username.clone(),
         },
     };
     client_connection_state.set(new_state);
@@ -96,11 +97,12 @@ fn update_client_game_state(
 }
 
 pub fn client_state_plugin_fn(app: &mut App) {
-    app.insert_state(ClientConnectionState::Disconnected);
+    app.insert_state(ClientConnectionState::None);
     app.insert_state(ClientGameState::None);
 
     app.add_systems(
         FixedUpdate,
-        (update_client_connection_state, update_client_game_state),
+        (update_client_connection_state, update_client_game_state)
+            .run_if(not(in_state(ClientConnectionState::None))),
     );
 }
