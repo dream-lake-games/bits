@@ -16,12 +16,33 @@ fn run_aseprite_cmd(args: &[&str]) -> Result<String> {
     let lock = File::create(std::env::temp_dir().join("aseprite_macro.lock"))?;
     lock.lock_exclusive()?;
 
-    let output = Command::new(ASEPRITE_BIN)
-        .args(args)
-        .output()
-        .with_context(|| format!("Failed to execute Aseprite at: {}", ASEPRITE_BIN))?;
+    // Retry with delay to handle race condition when Aseprite GUI is saving
+    let mut last_error = None;
+    for attempt in 0..3 {
+        if attempt > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
 
-    if !output.status.success() {
+        let output = Command::new(ASEPRITE_BIN)
+            .args(args)
+            .output()
+            .with_context(|| format!("Failed to execute Aseprite at: {}", ASEPRITE_BIN))?;
+
+        if output.status.success() {
+            let stdout = std::str::from_utf8(&output.stdout)
+                .context("Aseprite output was not valid UTF-8")?;
+            return Ok(stdout.into());
+        }
+
+        // Exit code 255 often means file is locked/busy - retry
+        if output.status.code() == Some(255) {
+            last_error = Some(format!(
+                "Aseprite command failed with exit code 255 (file may be busy)"
+            ));
+            continue;
+        }
+
+        // Other errors - fail immediately
         let stderr = String::from_utf8_lossy(&output.stderr);
         anyhow::bail!(
             "Aseprite command failed with exit code {:?}:\n{}",
@@ -30,9 +51,10 @@ fn run_aseprite_cmd(args: &[&str]) -> Result<String> {
         );
     }
 
-    let stdout =
-        std::str::from_utf8(&output.stdout).context("Aseprite output was not valid UTF-8")?;
-    Ok(stdout.into())
+    anyhow::bail!(
+        "{}",
+        last_error.unwrap_or_else(|| "Aseprite command failed".to_string())
+    )
 }
 
 fn get_mtime(path: &str) -> Option<SystemTime> {
