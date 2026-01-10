@@ -94,6 +94,26 @@ impl Assemble {
         self
     }
 
+    pub fn with_anim_variant<A: Anim + Assemblable>(mut self, variant: A) -> Self {
+        self.pixel_locations = A::get_pixel_locations();
+        self.on_spawn_anim = Some(Arc::new(move |entity, commands| {
+            commands.entity(entity).insert(
+                AnimMan::new(variant)
+                    .with_paused(true)
+                    .with_visible(false),
+            );
+        }));
+        self.on_assembled = Some(Arc::new(|entity, commands| {
+            commands.entity(entity).queue(|mut entity: EntityWorldMut| {
+                if let Some(mut anim) = entity.get_mut::<AnimMan<A>>() {
+                    anim.paused = false;
+                    anim.visible = true;
+                }
+            });
+        }));
+        self
+    }
+
     pub fn with_min_radius(mut self, min_radius: u32) -> Self {
         self.min_radius = min_radius;
         self

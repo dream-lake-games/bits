@@ -787,12 +787,8 @@ fn generate_anim_impl(
         .map(|p| vec![p.to_string()])
         .unwrap_or_default();
 
-    let batch_results = aseprite::batch_export_sprite_sheets(
-        absolute_file,
-        &tags,
-        &output_dir,
-        &exclude_prefixes,
-    )?;
+    let batch_results =
+        aseprite::batch_export_sprite_sheets(absolute_file, &tags, &output_dir, &exclude_prefixes)?;
 
     let mut export_infos: Vec<(String, String, aseprite::AnimExportInfo)> = Vec::new();
     for info in variant_infos {
@@ -896,17 +892,15 @@ fn generate_anim_impl(
         .find(|v| v.is_default)
         .unwrap_or(&variant_infos[0]);
 
-    let pixel_locations = extract_pixel_locations(
-        absolute_file,
-        &default_variant.tag,
-        exclude_prefix,
-    )
-    .with_context(|| {
-        format!(
-            "Failed to extract pixel locations for default variant '{}'",
-            default_variant.variant_name
-        )
-    })?;
+    let pixel_locations =
+        extract_pixel_locations(absolute_file, &default_variant.tag, exclude_prefix).with_context(
+            || {
+                format!(
+                    "Failed to extract pixel locations for default variant '{}'",
+                    default_variant.variant_name
+                )
+            },
+        )?;
 
     let pixel_exprs: Vec<_> = pixel_locations
         .iter()

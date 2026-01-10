@@ -4,6 +4,15 @@ use bevy_inspector_egui::bevy_egui::EguiPlugin;
 use bits::prelude::*;
 use bits::window::get_window_plugin_with_title;
 
+const SENTENCES: [&str; 3] = [
+    "Hello World",
+    "Supercalifragilisticexpialidocious is a long word",
+    "This is a very long sentence that has way too much text and should overflow the boundaries of the text box causing warnings and general chaos in the rendering system",
+];
+
+#[derive(Resource)]
+struct SentenceIndex(usize);
+
 fn startup(mut commands: Commands) {
     commands.spawn((
         Camera2d,
@@ -13,21 +22,29 @@ fn startup(mut commands: Commands) {
         },
     ));
 
+    commands.insert_resource(SentenceIndex(0));
+
     commands.spawn((
-        Name::new("Assemble"),
-        Assemble::new()
-            .with_assemblable::<PlayerPixels>()
-            .with_lifespan(0.5),
+        Name::new("AnimatedText"),
+        AnimatedText::new(SENTENCES[0], UVec2::new(320, 160), 0.05),
         Transform::default(),
         Visibility::Inherited,
     ));
 }
 
-#[derive(Assemblable)]
-#[file("assets/play/letters.aseprite")]
-#[tag("a")]
-#[exclude_prefix("_")]
-struct PlayerPixels;
+fn cycle_sentence(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut sentence_index: ResMut<SentenceIndex>,
+    mut text_query: Query<&mut AnimatedText>,
+) {
+    if keyboard.just_pressed(KeyCode::Space) {
+        sentence_index.0 = (sentence_index.0 + 1) % SENTENCES.len();
+        for mut text in text_query.iter_mut() {
+            text.text_this_frame = SENTENCES[sentence_index.0].to_string();
+            text.text_last_frame = None; // Force reset
+        }
+    }
+}
 
 fn main() {
     let mut app = App::new();
@@ -45,6 +62,7 @@ fn main() {
     app.add_plugins((bits_ui_plugin_fn,));
 
     app.add_systems(Startup, startup);
+    app.add_systems(Update, cycle_sentence);
 
     app.run();
 }

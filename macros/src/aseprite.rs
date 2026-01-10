@@ -1,6 +1,5 @@
 use anyhow::{Context, Result};
-use fs2::FileExt;
-use std::{fs::File, path::Path, process::Command, time::SystemTime};
+use std::{path::Path, process::Command, time::SystemTime};
 
 const ASEPRITE_BIN: &str = "/Users/mork/Library/Application Support/Steam/steamapps/common/Aseprite/Aseprite.app/Contents/MacOS/aseprite";
 
@@ -13,14 +12,11 @@ fn run_aseprite_cmd(args: &[&str]) -> Result<String> {
         anyhow::bail!("Aseprite not found at: {}", ASEPRITE_BIN);
     }
 
-    let lock = File::create(std::env::temp_dir().join("aseprite_macro.lock"))?;
-    lock.lock_exclusive()?;
-
     // Retry with delay to handle race condition when Aseprite GUI is saving
     let mut last_error = None;
-    for attempt in 0..3 {
+    for attempt in 0..5 {
         if attempt > 0 {
-            std::thread::sleep(std::time::Duration::from_millis(200));
+            std::thread::sleep(std::time::Duration::from_millis(500));
         }
 
         let output = Command::new(ASEPRITE_BIN)

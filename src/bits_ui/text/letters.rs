@@ -3,6 +3,68 @@ use macros::*;
 
 pub const LETTER_SIZE: u32 = 32;
 
+pub fn char_to_letter_anim(c: char) -> LetterAnim {
+    match c {
+        'a' => LetterAnim::A,
+        'b' => LetterAnim::B,
+        'c' => LetterAnim::C,
+        'd' => LetterAnim::D,
+        'e' => LetterAnim::E,
+        'f' => LetterAnim::F,
+        'g' => LetterAnim::G,
+        'h' => LetterAnim::H,
+        'i' => LetterAnim::I,
+        'j' => LetterAnim::J,
+        'k' => LetterAnim::K,
+        'l' => LetterAnim::L,
+        'm' => LetterAnim::M,
+        'n' => LetterAnim::N,
+        'o' => LetterAnim::O,
+        'p' => LetterAnim::P,
+        'q' => LetterAnim::Q,
+        'r' => LetterAnim::R,
+        's' => LetterAnim::S,
+        't' => LetterAnim::T,
+        'u' => LetterAnim::U,
+        'v' => LetterAnim::V,
+        'w' => LetterAnim::W,
+        'x' => LetterAnim::X,
+        'y' => LetterAnim::Y,
+        'z' => LetterAnim::Z,
+        'A' => LetterAnim::CapA,
+        'B' => LetterAnim::CapB,
+        'C' => LetterAnim::CapC,
+        'D' => LetterAnim::CapD,
+        'E' => LetterAnim::CapE,
+        'F' => LetterAnim::CapF,
+        'G' => LetterAnim::CapG,
+        'H' => LetterAnim::CapH,
+        'I' => LetterAnim::CapI,
+        'J' => LetterAnim::J, // No CapJ variant, fallback to lowercase
+        'K' => LetterAnim::CapK,
+        'L' => LetterAnim::CapL,
+        'M' => LetterAnim::CapM,
+        'N' => LetterAnim::CapN,
+        'O' => LetterAnim::CapO,
+        'P' => LetterAnim::CapP,
+        'Q' => LetterAnim::CapQ,
+        'R' => LetterAnim::CapR,
+        'S' => LetterAnim::CapS,
+        'T' => LetterAnim::CapT,
+        'U' => LetterAnim::CapU,
+        'V' => LetterAnim::CapV,
+        'W' => LetterAnim::CapW,
+        'X' => LetterAnim::CapX,
+        'Y' => LetterAnim::CapY,
+        'Z' => LetterAnim::CapZ,
+        ' ' => LetterAnim::Space,
+        _ => {
+            warn!("Unknown character '{}', using Space", c);
+            LetterAnim::Space
+        }
+    }
+}
+
 #[derive(Anim, Default, Clone, Copy, Debug)]
 #[file("assets/play/letters.aseprite")]
 #[exclude_prefix("_")]
