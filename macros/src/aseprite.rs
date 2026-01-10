@@ -1,79 +1,11 @@
 use anyhow::{Context, Result};
 use fs2::FileExt;
-use std::{collections::HashMap, fs::File, path::Path, process::Command, time::SystemTime};
+use std::{fs::File, path::Path, process::Command, time::SystemTime};
 
 const ASEPRITE_BIN: &str = "/Users/mork/Library/Application Support/Steam/steamapps/common/Aseprite/Aseprite.app/Contents/MacOS/aseprite";
 
 // ============================================================================
-// Metadata Reading (Fast Path)
-// ============================================================================
-
-#[derive(Debug, Clone)]
-pub struct MetadataTagInfo {
-    #[allow(dead_code)]
-    pub frame_from: u32,
-    pub frame_count: usize,
-    pub width: u32,
-    pub height: u32,
-}
-
-pub fn read_metadata(enum_name: &str) -> Option<HashMap<String, MetadataTagInfo>> {
-    let snake_name = to_snake_case(enum_name);
-    let metadata_path = format!("assets/_generated/anim/{}/_metadata.json", snake_name);
-
-    let content = std::fs::read_to_string(&metadata_path).ok()?;
-    let json: serde_json::Value = serde_json::from_str(&content).ok()?;
-
-    let source = json["source"].as_str()?;
-    let stored_mtime = json["source_mtime"].as_u64()?;
-
-    let current_mtime = std::fs::metadata(source)
-        .ok()?
-        .modified()
-        .ok()?
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .ok()?
-        .as_secs();
-
-    if stored_mtime != current_mtime {
-        return None;
-    }
-
-    let tags = json["tags"].as_object()?;
-    let mut result = HashMap::new();
-
-    for (tag, info) in tags {
-        result.insert(
-            tag.clone(),
-            MetadataTagInfo {
-                frame_from: info["frame_from"].as_u64()? as u32,
-                frame_count: info["frame_count"].as_u64()? as usize,
-                width: info["width"].as_u64()? as u32,
-                height: info["height"].as_u64()? as u32,
-            },
-        );
-    }
-
-    Some(result)
-}
-
-fn to_snake_case(s: &str) -> String {
-    let mut result = String::new();
-    for (i, c) in s.chars().enumerate() {
-        if c.is_uppercase() {
-            if i > 0 {
-                result.push('_');
-            }
-            result.push(c.to_lowercase().next().unwrap());
-        } else {
-            result.push(c);
-        }
-    }
-    result
-}
-
-// ============================================================================
-// Aseprite Commands (Slow Path - Fallback)
+// Aseprite Commands (with caching)
 // ============================================================================
 
 fn run_aseprite_cmd(args: &[&str]) -> Result<String> {

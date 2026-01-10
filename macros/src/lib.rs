@@ -37,7 +37,7 @@ pub fn derive_assemblable(input: TokenStream) -> TokenStream {
     };
 
     let pixel_locations =
-        match extract_pixel_locations(None, &absolute_file, &tag, exclude_prefix.as_deref()) {
+        match extract_pixel_locations(&absolute_file, &tag, exclude_prefix.as_deref()) {
             Ok(locs) => locs,
             Err(e) => {
                 return syn::Error::new_spanned(
@@ -126,41 +126,27 @@ fn get_absolute_path(file: &str) -> anyhow::Result<String> {
 }
 
 fn extract_pixel_locations(
-    enum_name: Option<&str>,
     file: &str,
     tag: &str,
     exclude_prefix: Option<&str>,
 ) -> anyhow::Result<Vec<(i32, i32)>> {
-    // Try to use pre-exported sprite sheet from build.rs (fast path)
-    let img = if let Some(name) = enum_name {
-        let enum_snake = to_snake_case(name);
-        let sprite_sheet_path = format!("assets/_generated/anim/{}/{}.png", enum_snake, tag);
+    let file_stem = std::path::Path::new(file)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("unknown");
+    let cache_dir = format!("assets/_generated/pixcache/{}", file_stem);
+    std::fs::create_dir_all(&cache_dir)?;
 
-        if std::path::Path::new(&sprite_sheet_path).exists() {
-            if let Some(metadata) = aseprite::read_metadata(name) {
-                if let Some(tag_meta) = metadata.get(tag) {
-                    let full_img = image::open(&sprite_sheet_path)
-                        .with_context(|| {
-                            format!("Failed to open sprite sheet: {}", sprite_sheet_path)
-                        })?
-                        .to_rgba8();
-                    // Extract first frame (horizontal sheet)
-                    let frame_width = tag_meta.width;
-                    let frame_height = tag_meta.height;
-                    image::imageops::crop_imm(&full_img, 0, 0, frame_width, frame_height).to_image()
-                } else {
-                    extract_pixel_locations_fallback(file, tag, exclude_prefix)?
-                }
-            } else {
-                extract_pixel_locations_fallback(file, tag, exclude_prefix)?
-            }
-        } else {
-            extract_pixel_locations_fallback(file, tag, exclude_prefix)?
-        }
-    } else {
-        extract_pixel_locations_fallback(file, tag, exclude_prefix)?
-    };
+    let cache_png = format!("{}/{}.png", cache_dir, tag);
 
+    let exclude_prefixes: Vec<String> = exclude_prefix
+        .map(|p| vec![p.to_string()])
+        .unwrap_or_default();
+    aseprite::export_single_frame(file, tag, &cache_png, &exclude_prefixes)?;
+
+    let img = image::open(&cache_png)
+        .with_context(|| format!("Failed to open exported PNG: {}", cache_png))?
+        .to_rgba8();
     let (width, height) = img.dimensions();
 
     if width % 2 != 0 || height % 2 != 0 {
@@ -183,31 +169,6 @@ fn extract_pixel_locations(
     }
 
     Ok(locations)
-}
-
-fn extract_pixel_locations_fallback(
-    file: &str,
-    tag: &str,
-    exclude_prefix: Option<&str>,
-) -> anyhow::Result<image::RgbaImage> {
-    let file_stem = std::path::Path::new(file)
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("unknown");
-    let cache_dir = format!("assets/_generated/pixcache/{}", file_stem);
-    std::fs::create_dir_all(&cache_dir)?;
-
-    let cache_png = format!("{}/{}.png", cache_dir, tag);
-
-    let exclude_prefixes: Vec<String> = exclude_prefix
-        .map(|p| vec![p.to_string()])
-        .unwrap_or_default();
-    aseprite::export_single_frame(file, tag, &cache_png, &exclude_prefixes)?;
-
-    let img = image::open(&cache_png)
-        .with_context(|| format!("Failed to open exported PNG: {}", cache_png))?
-        .to_rgba8();
-    Ok(img)
 }
 
 #[proc_macro_derive(Anim, attributes(file, fps, exclude_prefix, next))]
@@ -383,7 +344,6 @@ pub fn derive_anim(input: TokenStream) -> TokenStream {
         .unwrap_or(&variant_infos[0]);
 
     let pixel_locations = match extract_pixel_locations(
-        Some(&struct_name.to_string()),
         &absolute_file,
         &default_variant.tag,
         anim_attrs.exclude_prefix.as_deref(),
@@ -822,54 +782,30 @@ fn generate_anim_impl(
     let struct_snake = to_snake_case(&struct_name.to_string());
     let output_dir = format!("assets/_generated/anim/{}", struct_snake);
 
-    // Try to use pre-generated metadata from build.rs (fast path)
-    let export_infos: Vec<(String, String, aseprite::AnimExportInfo)> =
-        if let Some(metadata) = aseprite::read_metadata(&struct_name.to_string()) {
-            let mut infos = Vec::new();
-            for info in variant_infos {
-                let tag_meta = metadata
-                    .get(&info.tag)
-                    .ok_or_else(|| anyhow::anyhow!("Tag '{}' not found in metadata", info.tag))?;
-                let output_path = format!("{}/{}.png", output_dir, info.tag);
-                infos.push((
-                    info.variant_name.clone(),
-                    output_path,
-                    aseprite::AnimExportInfo {
-                        frame_count: tag_meta.frame_count,
-                        frame_width: tag_meta.width,
-                        frame_height: tag_meta.height,
-                    },
-                ));
-            }
-            infos
-        } else {
-            // Fallback to Aseprite calls (slow path)
-            let tags: Vec<String> = variant_infos.iter().map(|v| v.tag.clone()).collect();
-            let exclude_prefixes: Vec<String> = exclude_prefix
-                .map(|p| vec![p.to_string()])
-                .unwrap_or_default();
+    let tags: Vec<String> = variant_infos.iter().map(|v| v.tag.clone()).collect();
+    let exclude_prefixes: Vec<String> = exclude_prefix
+        .map(|p| vec![p.to_string()])
+        .unwrap_or_default();
 
-            let batch_results = aseprite::batch_export_sprite_sheets(
-                absolute_file,
-                &tags,
-                &output_dir,
-                &exclude_prefixes,
-            )?;
+    let batch_results = aseprite::batch_export_sprite_sheets(
+        absolute_file,
+        &tags,
+        &output_dir,
+        &exclude_prefixes,
+    )?;
 
-            let mut infos = Vec::new();
-            for info in variant_infos {
-                let result = batch_results
-                    .iter()
-                    .find(|r| r.tag == info.tag)
-                    .ok_or_else(|| anyhow::anyhow!("Missing export for tag '{}'", info.tag))?;
-                infos.push((
-                    info.variant_name.clone(),
-                    result.output_path.clone(),
-                    result.info.clone(),
-                ));
-            }
-            infos
-        };
+    let mut export_infos: Vec<(String, String, aseprite::AnimExportInfo)> = Vec::new();
+    for info in variant_infos {
+        let result = batch_results
+            .iter()
+            .find(|r| r.tag == info.tag)
+            .ok_or_else(|| anyhow::anyhow!("Missing export for tag '{}'", info.tag))?;
+        export_infos.push((
+            info.variant_name.clone(),
+            result.output_path.clone(),
+            result.info.clone(),
+        ));
+    }
 
     let variant_idents: Vec<_> = variant_infos
         .iter()
@@ -961,7 +897,6 @@ fn generate_anim_impl(
         .unwrap_or(&variant_infos[0]);
 
     let pixel_locations = extract_pixel_locations(
-        Some(&struct_name.to_string()),
         absolute_file,
         &default_variant.tag,
         exclude_prefix,
