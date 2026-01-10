@@ -97,11 +97,9 @@ impl Assemble {
     pub fn with_anim_variant<A: Anim + Assemblable>(mut self, variant: A) -> Self {
         self.pixel_locations = A::get_pixel_locations();
         self.on_spawn_anim = Some(Arc::new(move |entity, commands| {
-            commands.entity(entity).insert(
-                AnimMan::new(variant)
-                    .with_paused(true)
-                    .with_visible(false),
-            );
+            commands
+                .entity(entity)
+                .insert(AnimMan::new(variant).with_paused(true).with_visible(false));
         }));
         self.on_assembled = Some(Arc::new(|entity, commands| {
             commands.entity(entity).queue(|mut entity: EntityWorldMut| {
@@ -165,6 +163,7 @@ fn on_add_assemble(mut world: DeferredWorld, hook: HookContext) {
                 )
                 .bundle(),
                 PixelOf(entity),
+                Visibility::Inherited,
             ));
         }
     });

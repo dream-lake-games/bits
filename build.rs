@@ -158,4 +158,3 @@ fn extract_enum_name(line: &str) -> Option<String> {
         Some(name.to_string())
     }
 }
-

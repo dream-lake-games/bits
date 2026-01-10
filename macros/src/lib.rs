@@ -681,7 +681,7 @@ impl Parse for AnimEnumInput {
 }
 
 #[proc_macro]
-pub fn anim_enum(input: TokenStream) -> TokenStream {
+pub fn exhaust_anim_enum(input: TokenStream) -> TokenStream {
     let config = parse_macro_input!(input as AnimEnumInput);
 
     // Get absolute file path

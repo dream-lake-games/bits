@@ -1,7 +1,8 @@
 use anyhow::{Context, Result};
 use std::{path::Path, process::Command, time::SystemTime};
 
-const ASEPRITE_BIN: &str = "/Users/mork/Library/Application Support/Steam/steamapps/common/Aseprite/Aseprite.app/Contents/MacOS/aseprite";
+const ASEPRITE_BIN: &str = "/Applications/Aseprite.app/Contents/MacOS/aseprite";
+// const ASEPRITE_BIN: &str = "/Users/mork/Library/Application Support/Steam/steamapps/common/Aseprite/Aseprite.app/Contents/MacOS/aseprite";
 
 // ============================================================================
 // Aseprite Commands (with caching)

@@ -209,6 +209,7 @@ fn tick_char_state(
                         .with_min_radius(20)
                         .with_max_radius(40),
                     Transform::from_translation(offset.extend(0).as_vec3()),
+                    Visibility::Inherited,
                 ));
             });
         }

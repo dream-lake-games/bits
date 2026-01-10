@@ -76,6 +76,7 @@ pub struct AnimMan<A: Anim> {
     timer: f32,
     pub paused: bool,
     pub visible: bool,
+    pub color: Color,
     _phantom: PhantomData<A>,
 }
 
@@ -90,6 +91,7 @@ impl<A: Anim> AnimMan<A> {
             timer: 0.0,
             paused: false,
             visible: true,
+            color: Color::WHITE,
             _phantom: PhantomData,
         }
     }
@@ -104,10 +106,19 @@ impl<A: Anim> AnimMan<A> {
         self
     }
 
+    pub fn with_color(mut self, color: Color) -> Self {
+        self.color = color;
+        self
+    }
+
     pub fn set(&mut self, value: A) {
         self.variant_index = value.index();
         self.frame = 0;
         self.timer = 0.0;
+    }
+
+    pub fn set_color(&mut self, color: Color) {
+        self.color = color;
     }
 
     pub fn get(&self) -> A {
@@ -124,6 +135,7 @@ fn on_add_anim_man<A: Anim>(mut world: DeferredWorld, ctx: HookContext) {
     let variant = state.current();
     let frame = state.frame;
     let visible = state.visible;
+    let color = state.color;
 
     let asset_server = world.resource::<AssetServer>();
     let image_handle: Handle<Image> = asset_server.load(variant.asset_path);
@@ -153,6 +165,7 @@ fn on_add_anim_man<A: Anim>(mut world: DeferredWorld, ctx: HookContext) {
             AnimSprite::<A>::default(),
             Sprite {
                 image: image_handle,
+                color,
                 texture_atlas: Some(TextureAtlas {
                     layout: layout_handle,
                     index: frame,
@@ -220,6 +233,7 @@ fn tick_anim_typed<A: Anim>(
         } else {
             Visibility::Hidden
         };
+        sprite.color = state.color;
 
         if state.variant_index != state.loaded_variant_index {
             load_variant_sprite(&mut state, &mut sprite, &asset_server, &mut layouts);

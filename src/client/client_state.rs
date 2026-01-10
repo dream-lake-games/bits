@@ -97,7 +97,7 @@ fn update_client_game_state(
 }
 
 pub fn client_state_plugin_fn(app: &mut App) {
-    app.insert_state(ClientConnectionState::None);
+    app.insert_state(ClientConnectionState::Disconnected);
     app.insert_state(ClientGameState::None);
 
     app.add_systems(
