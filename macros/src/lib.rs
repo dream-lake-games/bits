@@ -5,7 +5,9 @@ mod aseprite;
 use anyhow::Context;
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{Data, DeriveInput, Fields, Lit, Meta, Variant, parse_macro_input};
+use std::collections::HashMap;
+use syn::parse::{Parse, ParseStream};
+use syn::{Data, DeriveInput, Fields, Lit, Meta, Token, Variant, parse_macro_input};
 
 #[proc_macro_derive(Assemblable, attributes(file, tag, exclude_prefix))]
 pub fn derive_assemblable(input: TokenStream) -> TokenStream {
@@ -35,7 +37,7 @@ pub fn derive_assemblable(input: TokenStream) -> TokenStream {
     };
 
     let pixel_locations =
-        match extract_pixel_locations(&absolute_file, &tag, exclude_prefix.as_deref()) {
+        match extract_pixel_locations(None, &absolute_file, &tag, exclude_prefix.as_deref()) {
             Ok(locs) => locs,
             Err(e) => {
                 return syn::Error::new_spanned(
@@ -124,30 +126,41 @@ fn get_absolute_path(file: &str) -> anyhow::Result<String> {
 }
 
 fn extract_pixel_locations(
+    enum_name: Option<&str>,
     file: &str,
     tag: &str,
     exclude_prefix: Option<&str>,
 ) -> anyhow::Result<Vec<(i32, i32)>> {
-    aseprite::validate_tag(file, tag)?;
+    // Try to use pre-exported sprite sheet from build.rs (fast path)
+    let img = if let Some(name) = enum_name {
+        let enum_snake = to_snake_case(name);
+        let sprite_sheet_path = format!("assets/_generated/anim/{}/{}.png", enum_snake, tag);
 
-    let temp_dir = std::env::temp_dir();
-    let temp_png = temp_dir.join(format!(
-        "assemblable_{}_{}.png",
-        file.replace(['/', '\\', '.'], "_"),
-        tag
-    ));
+        if std::path::Path::new(&sprite_sheet_path).exists() {
+            if let Some(metadata) = aseprite::read_metadata(name) {
+                if let Some(tag_meta) = metadata.get(tag) {
+                    let full_img = image::open(&sprite_sheet_path)
+                        .with_context(|| {
+                            format!("Failed to open sprite sheet: {}", sprite_sheet_path)
+                        })?
+                        .to_rgba8();
+                    // Extract first frame (horizontal sheet)
+                    let frame_width = tag_meta.width;
+                    let frame_height = tag_meta.height;
+                    image::imageops::crop_imm(&full_img, 0, 0, frame_width, frame_height).to_image()
+                } else {
+                    extract_pixel_locations_fallback(file, tag, exclude_prefix)?
+                }
+            } else {
+                extract_pixel_locations_fallback(file, tag, exclude_prefix)?
+            }
+        } else {
+            extract_pixel_locations_fallback(file, tag, exclude_prefix)?
+        }
+    } else {
+        extract_pixel_locations_fallback(file, tag, exclude_prefix)?
+    };
 
-    let mut builder = aseprite::ExportBuilder::new(file, tag);
-    if let Some(prefix) = exclude_prefix {
-        builder = builder.exclude_prefix(prefix);
-    }
-    builder
-        .export_to_file(temp_png.to_str().unwrap())
-        .with_context(|| format!("Failed to export aseprite file '{}' tag '{}'", file, tag))?;
-
-    let img = image::open(&temp_png)
-        .with_context(|| format!("Failed to open exported PNG: {}", temp_png.display()))?
-        .to_rgba8();
     let (width, height) = img.dimensions();
 
     if width % 2 != 0 || height % 2 != 0 {
@@ -169,9 +182,32 @@ fn extract_pixel_locations(
         }
     }
 
-    let _ = std::fs::remove_file(&temp_png);
-
     Ok(locations)
+}
+
+fn extract_pixel_locations_fallback(
+    file: &str,
+    tag: &str,
+    exclude_prefix: Option<&str>,
+) -> anyhow::Result<image::RgbaImage> {
+    let file_stem = std::path::Path::new(file)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("unknown");
+    let cache_dir = format!("assets/_generated/pixcache/{}", file_stem);
+    std::fs::create_dir_all(&cache_dir)?;
+
+    let cache_png = format!("{}/{}.png", cache_dir, tag);
+
+    let exclude_prefixes: Vec<String> = exclude_prefix
+        .map(|p| vec![p.to_string()])
+        .unwrap_or_default();
+    aseprite::export_single_frame(file, tag, &cache_png, &exclude_prefixes)?;
+
+    let img = image::open(&cache_png)
+        .with_context(|| format!("Failed to open exported PNG: {}", cache_png))?
+        .to_rgba8();
+    Ok(img)
 }
 
 #[proc_macro_derive(Anim, attributes(file, fps, exclude_prefix, next))]
@@ -214,37 +250,47 @@ pub fn derive_anim(input: TokenStream) -> TokenStream {
 
     let struct_name = &input.ident;
     let struct_snake = to_snake_case(&struct_name.to_string());
-
     let output_dir = format!("assets/_generated/anim/{}", struct_snake);
-    if let Err(e) = std::fs::create_dir_all(&output_dir) {
-        return syn::Error::new_spanned(
-            &input.ident,
-            format!("Failed to create output directory '{}': {}", output_dir, e),
-        )
-        .to_compile_error()
-        .into();
-    }
+
+    let tags: Vec<String> = variant_infos.iter().map(|v| v.tag.clone()).collect();
+    let exclude_prefixes: Vec<String> = anim_attrs
+        .exclude_prefix
+        .as_ref()
+        .map(|p| vec![p.clone()])
+        .unwrap_or_default();
+
+    let batch_results = match aseprite::batch_export_sprite_sheets(
+        &absolute_file,
+        &tags,
+        &output_dir,
+        &exclude_prefixes,
+    ) {
+        Ok(r) => r,
+        Err(e) => {
+            return syn::Error::new_spanned(&input.ident, format!("Export failed: {}", e))
+                .to_compile_error()
+                .into();
+        }
+    };
 
     let mut export_infos: Vec<(String, String, aseprite::AnimExportInfo)> = Vec::new();
     for info in &variant_infos {
-        let output_path = format!("{}/{}.png", output_dir, info.tag);
-        let mut builder = aseprite::ExportBuilder::new(&absolute_file, &info.tag);
-        if let Some(ref prefix) = anim_attrs.exclude_prefix {
-            builder = builder.exclude_prefix(prefix);
-        }
-        match builder.export_sprite_sheet(&output_path) {
-            Ok(export_info) => {
-                export_infos.push((info.variant_name.clone(), output_path, export_info));
-            }
-            Err(e) => {
+        let result = match batch_results.iter().find(|r| r.tag == info.tag) {
+            Some(r) => r,
+            None => {
                 return syn::Error::new_spanned(
                     &input.ident,
-                    format!("Failed to export tag '{}': {}", info.tag, e),
+                    format!("Missing export for tag '{}'", info.tag),
                 )
                 .to_compile_error()
                 .into();
             }
-        }
+        };
+        export_infos.push((
+            info.variant_name.clone(),
+            result.output_path.clone(),
+            result.info.clone(),
+        ));
     }
 
     let variant_idents: Vec<_> = variant_infos
@@ -337,6 +383,7 @@ pub fn derive_anim(input: TokenStream) -> TokenStream {
         .unwrap_or(&variant_infos[0]);
 
     let pixel_locations = match extract_pixel_locations(
+        Some(&struct_name.to_string()),
         &absolute_file,
         &default_variant.tag,
         anim_attrs.exclude_prefix.as_deref(),
@@ -481,6 +528,7 @@ fn get_enum_variants(input: &DeriveInput) -> syn::Result<Vec<&Variant>> {
     }
 }
 
+#[derive(Clone)]
 enum AnimNext {
     State(String),
     Loop,
@@ -563,4 +611,445 @@ fn to_snake_case(s: &str) -> String {
         }
     }
     result
+}
+
+fn to_pascal_case(s: &str) -> String {
+    s.split('_')
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                Some(c) => c.to_uppercase().chain(chars).collect(),
+                None => String::new(),
+            }
+        })
+        .collect()
+}
+
+// ============================================================================
+// anim_enum! macro
+// ============================================================================
+
+struct AnimEnumInput {
+    vis: syn::Visibility,
+    name: syn::Ident,
+    file: String,
+    exclude: Option<String>,
+    default: syn::Ident,
+    fps: Option<u32>,
+    next_overrides: HashMap<String, AnimNext>,
+}
+
+impl Parse for AnimEnumInput {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        // Parse: pub enum Name,
+        let vis: syn::Visibility = input.parse()?;
+        input.parse::<Token![enum]>()?;
+        let name: syn::Ident = input.parse()?;
+        input.parse::<Token![,]>()?;
+
+        let mut file: Option<String> = None;
+        let mut exclude: Option<String> = None;
+        let mut default: Option<syn::Ident> = None;
+        let mut fps: Option<u32> = None;
+        let mut next_overrides: HashMap<String, AnimNext> = HashMap::new();
+
+        // Parse key: value pairs
+        while !input.is_empty() {
+            let key: syn::Ident = input.parse()?;
+            input.parse::<Token![:]>()?;
+
+            match key.to_string().as_str() {
+                "file" => {
+                    let lit: syn::LitStr = input.parse()?;
+                    file = Some(lit.value());
+                }
+                "exclude" => {
+                    let lit: syn::LitStr = input.parse()?;
+                    exclude = Some(lit.value());
+                }
+                "default" => {
+                    default = Some(input.parse()?);
+                }
+                "fps" => {
+                    let lit: syn::LitInt = input.parse()?;
+                    fps = Some(lit.base10_parse()?);
+                }
+                "next" => {
+                    let content;
+                    syn::braced!(content in input);
+                    while !content.is_empty() {
+                        let variant: syn::Ident = content.parse()?;
+                        content.parse::<Token![=>]>()?;
+                        let target: syn::Ident = content.parse()?;
+                        let target_str = target.to_string();
+                        let next = match target_str.as_str() {
+                            "ANIM_DESPAWN" | "AnimDespawn" => AnimNext::Despawn,
+                            "ANIM_REMOVE" | "AnimRemove" => AnimNext::Remove,
+                            _ => AnimNext::State(target_str),
+                        };
+                        next_overrides.insert(variant.to_string(), next);
+                        if content.peek(Token![,]) {
+                            content.parse::<Token![,]>()?;
+                        }
+                    }
+                }
+                _ => {
+                    return Err(syn::Error::new(key.span(), format!("Unknown key: {}", key)));
+                }
+            }
+
+            if input.peek(Token![,]) {
+                input.parse::<Token![,]>()?;
+            }
+        }
+
+        let file =
+            file.ok_or_else(|| syn::Error::new(input.span(), "Missing required field: file"))?;
+        let default = default
+            .ok_or_else(|| syn::Error::new(input.span(), "Missing required field: default"))?;
+
+        Ok(AnimEnumInput {
+            vis,
+            name,
+            file,
+            exclude,
+            default,
+            fps,
+            next_overrides,
+        })
+    }
+}
+
+#[proc_macro]
+pub fn anim_enum(input: TokenStream) -> TokenStream {
+    let config = parse_macro_input!(input as AnimEnumInput);
+
+    // Get absolute file path
+    let absolute_file = match get_absolute_path(&config.file) {
+        Ok(p) => p,
+        Err(e) => {
+            return syn::Error::new(proc_macro2::Span::call_site(), format!("{}", e))
+                .to_compile_error()
+                .into();
+        }
+    };
+
+    // List tags from aseprite file
+    let tags = match aseprite::list_tags(&absolute_file) {
+        Ok(t) => t,
+        Err(e) => {
+            return syn::Error::new(
+                proc_macro2::Span::call_site(),
+                format!("Failed to list tags: {}", e),
+            )
+            .to_compile_error()
+            .into();
+        }
+    };
+
+    // Filter by exclude prefix and convert to variant info
+    let variant_infos: Vec<AnimVariantInfo> = tags
+        .iter()
+        .filter(|tag| {
+            if let Some(ref prefix) = config.exclude {
+                !tag.starts_with(prefix)
+            } else {
+                true
+            }
+        })
+        .map(|tag| {
+            let variant_name = to_pascal_case(tag);
+            let is_default = variant_name == config.default.to_string();
+            let next = config
+                .next_overrides
+                .get(&variant_name)
+                .cloned()
+                .unwrap_or(AnimNext::Loop);
+            AnimVariantInfo {
+                variant_name,
+                tag: tag.clone(),
+                fps: config.fps,
+                next,
+                is_default,
+            }
+        })
+        .collect();
+
+    if variant_infos.is_empty() {
+        return syn::Error::new(
+            proc_macro2::Span::call_site(),
+            "No variants found after filtering",
+        )
+        .to_compile_error()
+        .into();
+    }
+
+    // Validate default exists
+    if !variant_infos.iter().any(|v| v.is_default) {
+        return syn::Error::new(
+            config.default.span(),
+            format!("Default variant '{}' not found in tags", config.default),
+        )
+        .to_compile_error()
+        .into();
+    }
+
+    // Generate the implementation
+    match generate_anim_impl(
+        &config.name,
+        &config.vis,
+        &absolute_file,
+        config.exclude.as_deref(),
+        &variant_infos,
+        true, // generate_enum = true for anim_enum!
+    ) {
+        Ok(tokens) => tokens,
+        Err(e) => syn::Error::new(proc_macro2::Span::call_site(), format!("{}", e))
+            .to_compile_error()
+            .into(),
+    }
+}
+
+/// Shared generation logic for both derive_anim and anim_enum!
+fn generate_anim_impl(
+    struct_name: &syn::Ident,
+    vis: &syn::Visibility,
+    absolute_file: &str,
+    exclude_prefix: Option<&str>,
+    variant_infos: &[AnimVariantInfo],
+    generate_enum: bool,
+) -> anyhow::Result<TokenStream> {
+    let struct_snake = to_snake_case(&struct_name.to_string());
+    let output_dir = format!("assets/_generated/anim/{}", struct_snake);
+
+    // Try to use pre-generated metadata from build.rs (fast path)
+    let export_infos: Vec<(String, String, aseprite::AnimExportInfo)> =
+        if let Some(metadata) = aseprite::read_metadata(&struct_name.to_string()) {
+            let mut infos = Vec::new();
+            for info in variant_infos {
+                let tag_meta = metadata
+                    .get(&info.tag)
+                    .ok_or_else(|| anyhow::anyhow!("Tag '{}' not found in metadata", info.tag))?;
+                let output_path = format!("{}/{}.png", output_dir, info.tag);
+                infos.push((
+                    info.variant_name.clone(),
+                    output_path,
+                    aseprite::AnimExportInfo {
+                        frame_count: tag_meta.frame_count,
+                        frame_width: tag_meta.width,
+                        frame_height: tag_meta.height,
+                    },
+                ));
+            }
+            infos
+        } else {
+            // Fallback to Aseprite calls (slow path)
+            let tags: Vec<String> = variant_infos.iter().map(|v| v.tag.clone()).collect();
+            let exclude_prefixes: Vec<String> = exclude_prefix
+                .map(|p| vec![p.to_string()])
+                .unwrap_or_default();
+
+            let batch_results = aseprite::batch_export_sprite_sheets(
+                absolute_file,
+                &tags,
+                &output_dir,
+                &exclude_prefixes,
+            )?;
+
+            let mut infos = Vec::new();
+            for info in variant_infos {
+                let result = batch_results
+                    .iter()
+                    .find(|r| r.tag == info.tag)
+                    .ok_or_else(|| anyhow::anyhow!("Missing export for tag '{}'", info.tag))?;
+                infos.push((
+                    info.variant_name.clone(),
+                    result.output_path.clone(),
+                    result.info.clone(),
+                ));
+            }
+            infos
+        };
+
+    let variant_idents: Vec<_> = variant_infos
+        .iter()
+        .map(|v| syn::Ident::new(&v.variant_name, proc_macro2::Span::call_site()))
+        .collect();
+
+    let tags: Vec<_> = variant_infos.iter().map(|v| &v.tag).collect();
+
+    let frame_counts: Vec<_> = export_infos
+        .iter()
+        .map(|(_, _, info)| info.frame_count)
+        .collect();
+
+    let frame_widths: Vec<_> = export_infos
+        .iter()
+        .map(|(_, _, info)| info.frame_width)
+        .collect();
+
+    let frame_heights: Vec<_> = export_infos
+        .iter()
+        .map(|(_, _, info)| info.frame_height)
+        .collect();
+
+    let file_paths: Vec<_> = export_infos
+        .iter()
+        .map(|(_, path, _)| path.clone())
+        .collect();
+
+    let asset_paths: Vec<_> = file_paths
+        .iter()
+        .map(|path| path.strip_prefix("assets/").unwrap_or(path).to_string())
+        .collect();
+
+    let include_bytes_checks: Vec<_> = file_paths
+        .iter()
+        .map(|path| {
+            let abs_path = std::fs::canonicalize(path)
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|_| path.clone());
+            quote! { const _: &[u8] = include_bytes!(#abs_path); }
+        })
+        .collect();
+
+    let variant_indices: Vec<_> = (0..variant_infos.len()).collect();
+
+    let fps_values: Vec<_> = variant_infos
+        .iter()
+        .map(|info| {
+            if let Some(fps) = info.fps {
+                let fps_lit = fps as f32;
+                quote! { Some(#fps_lit) }
+            } else {
+                quote! { None }
+            }
+        })
+        .collect();
+
+    let next_indices: Vec<_> = variant_infos
+        .iter()
+        .enumerate()
+        .map(|(i, info)| match &info.next {
+            AnimNext::State(next_name) => {
+                let next_idx = variant_infos
+                    .iter()
+                    .position(|v| &v.variant_name == next_name)
+                    .unwrap_or(i);
+                quote! { bits::bits_ui::anim::AnimNextIndex::Index(#next_idx) }
+            }
+            AnimNext::Loop => {
+                quote! { bits::bits_ui::anim::AnimNextIndex::Index(#i) }
+            }
+            AnimNext::Remove => {
+                quote! { bits::bits_ui::anim::AnimNextIndex::Remove }
+            }
+            AnimNext::Despawn => {
+                quote! { bits::bits_ui::anim::AnimNextIndex::Despawn }
+            }
+        })
+        .collect();
+
+    let table_name = syn::Ident::new(
+        &format!("{}_ANIM_TABLE", struct_name.to_string().to_uppercase()),
+        proc_macro2::Span::call_site(),
+    );
+
+    let default_variant = variant_infos
+        .iter()
+        .find(|v| v.is_default)
+        .unwrap_or(&variant_infos[0]);
+
+    let pixel_locations = extract_pixel_locations(
+        Some(&struct_name.to_string()),
+        absolute_file,
+        &default_variant.tag,
+        exclude_prefix,
+    )
+    .with_context(|| {
+        format!(
+            "Failed to extract pixel locations for default variant '{}'",
+            default_variant.variant_name
+        )
+    })?;
+
+    let pixel_exprs: Vec<_> = pixel_locations
+        .iter()
+        .map(|(x, y)| quote! { bevy::prelude::IVec2::new(#x, #y) })
+        .collect();
+
+    let default_ident = syn::Ident::new(
+        &default_variant.variant_name,
+        proc_macro2::Span::call_site(),
+    );
+
+    // Generate enum definition if requested (for anim_enum! macro)
+    let enum_def = if generate_enum {
+        quote! {
+            #[derive(Clone, Copy, Debug)]
+            #vis enum #struct_name {
+                #(#variant_idents,)*
+            }
+
+            impl Default for #struct_name {
+                fn default() -> Self {
+                    Self::#default_ident
+                }
+            }
+        }
+    } else {
+        quote! {}
+    };
+
+    let expanded = quote! {
+        #enum_def
+
+        #(#include_bytes_checks)*
+
+        static #table_name: &[bits::bits_ui::anim::AnimVariant] = &[
+            #(
+                bits::bits_ui::anim::AnimVariant {
+                    tag: #tags,
+                    fps: #fps_values,
+                    frame_count: #frame_counts,
+                    frame_size: (#frame_widths, #frame_heights),
+                    asset_path: #asset_paths,
+                    next: #next_indices,
+                },
+            )*
+        ];
+
+        impl bits::bits_ui::anim::Anim for #struct_name {
+            fn table() -> &'static [bits::bits_ui::anim::AnimVariant] {
+                #table_name
+            }
+
+            fn index(&self) -> usize {
+                match self {
+                    #(Self::#variant_idents => #variant_indices,)*
+                }
+            }
+
+            fn from_index(index: usize) -> Self {
+                match index {
+                    #(#variant_indices => Self::#variant_idents,)*
+                    _ => Self::default(),
+                }
+            }
+        }
+
+        impl bits::bits_ui::assemble::Assemblable for #struct_name {
+            fn get_pixel_locations() -> Vec<bevy::prelude::IVec2> {
+                vec![#(#pixel_exprs),*]
+            }
+        }
+
+        impl #struct_name {
+            pub fn plugin(app: &mut bevy::prelude::App) {
+                bits::bits_ui::anim::register_anim::<#struct_name>(app);
+            }
+        }
+    };
+
+    Ok(TokenStream::from(expanded))
 }

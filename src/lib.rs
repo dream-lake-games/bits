@@ -1,3 +1,6 @@
+// Allow the crate to reference itself as `bits::` for macro compatibility
+extern crate self as bits;
+
 pub mod ai;
 pub mod bits_ui;
 pub mod consts;

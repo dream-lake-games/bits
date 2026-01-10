@@ -1,0 +1,63 @@
+use bevy::prelude::*;
+use macros::*;
+
+pub const LETTER_SIZE: u32 = 32;
+
+#[derive(Anim, Default, Clone, Copy, Debug)]
+#[file("assets/play/letters.aseprite")]
+#[exclude_prefix("_")]
+pub enum LetterAnim {
+    #[default]
+    Space,
+    A,
+    CapA,
+    B,
+    CapB,
+    C,
+    CapC,
+    D,
+    CapD,
+    E,
+    CapE,
+    F,
+    CapF,
+    G,
+    CapG,
+    H,
+    CapH,
+    I,
+    CapI,
+    J,
+    K,
+    CapK,
+    L,
+    CapL,
+    M,
+    CapM,
+    N,
+    CapN,
+    O,
+    CapO,
+    P,
+    CapP,
+    Q,
+    CapQ,
+    R,
+    CapR,
+    S,
+    CapS,
+    T,
+    CapT,
+    U,
+    CapU,
+    V,
+    CapV,
+    W,
+    CapW,
+    X,
+    CapX,
+    Y,
+    CapY,
+    Z,
+    CapZ,
+}

@@ -11,11 +11,11 @@ include!(concat!(env!("OUT_DIR"), "/anim_registry_anim.rs"));
 #[exclude_prefix("_")]
 enum LetterAnim {
     #[default]
-    #[next(B)]
+    Space,
     A,
+    CapA,
     B,
-    #[next(ANIM_DESPAWN)]
-    Poof,
+    CapB,
 }
 
 fn startup(mut commands: Commands) {
@@ -37,13 +37,7 @@ fn startup(mut commands: Commands) {
     ));
 }
 
-fn handle_input(keys: Res<ButtonInput<KeyCode>>, mut query: Query<&mut AnimMan<LetterAnim>>) {
-    if keys.just_pressed(KeyCode::Space) {
-        for mut anim_man in query.iter_mut() {
-            anim_man.set(LetterAnim::Poof);
-        }
-    }
-}
+fn handle_input(_keys: Res<ButtonInput<KeyCode>>) {}
 
 fn main() {
     App::new()

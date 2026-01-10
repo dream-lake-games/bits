@@ -5,6 +5,7 @@ pub mod assemble;
 pub mod button_simple;
 pub mod flex_simple;
 pub mod spacer;
+pub mod text;
 pub mod text_simple;
 
 pub use anim::{Anim, AnimConfig, AnimMan, AnimNextIndex, AnimPlugin, AnimVariant};
