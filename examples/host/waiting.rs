@@ -22,7 +22,11 @@ fn startup(mut commands: Commands) {
 
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins.set(get_window_plugin_with_title("Host: Waiting")))
+        .add_plugins(
+            DefaultPlugins
+                .set(get_window_plugin_with_title("Host: Waiting"))
+                .set(ImagePlugin::default_nearest()),
+        )
         .add_plugins(EguiPlugin::default())
         .add_plugins(
             bevy_inspector_egui::quick::WorldInspectorPlugin::default()

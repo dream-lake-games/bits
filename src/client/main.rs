@@ -19,7 +19,11 @@ fn main() {
     let client_name = std::env::var("CLIENT_NAME").unwrap_or_else(|_| "Unknown".to_string());
     let window_title = format!("Client {}", client_name);
 
-    app.add_plugins(DefaultPlugins.set(get_window_plugin_with_title(&window_title)))
+    app.add_plugins(
+        DefaultPlugins
+            .set(get_window_plugin_with_title(&window_title))
+            .set(ImagePlugin::default_nearest()),
+    )
         .add_plugins(EguiPlugin::default())
         .add_plugins(
             bevy_inspector_egui::quick::WorldInspectorPlugin::default()

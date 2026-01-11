@@ -126,7 +126,11 @@ fn adjust_bloom(keyboard: Res<ButtonInput<KeyCode>>, mut bloom_query: Query<&mut
 
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins.set(get_window_plugin_with_title("Bloom Example")))
+        .add_plugins(
+            DefaultPlugins
+                .set(get_window_plugin_with_title("Bloom Example"))
+                .set(ImagePlugin::default_nearest()),
+        )
         .add_plugins(EguiPlugin::default())
         .add_plugins(
             bevy_inspector_egui::quick::WorldInspectorPlugin::default()

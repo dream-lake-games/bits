@@ -18,7 +18,7 @@ pub use button_simple::{ButtonSimple, ButtonSimpleDrawState};
 pub use flex_simple::FlexSimple;
 pub use sentence_list::SentenceList;
 pub use spacer::Spacer;
-pub use text::{AnimatedText, BUTTON_SIZE, Button, LETTER_SIZE};
+pub use text::{AnimatedText, AnimatedTextSize, BUTTON_SIZE, Button, LETTER_SIZE};
 pub use text_simple::TextSimple;
 
 fn spawn_bg(mut commands: Commands) {

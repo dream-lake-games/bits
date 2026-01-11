@@ -41,16 +41,16 @@ fn split_text_into_lines(text: String, max_chars_per_line: u32, max_lines: u32) 
     result
 }
 
-fn get_char_offsets(lines: Vec<String>) -> HashMap<IVec2, char> {
+fn get_char_offsets(lines: Vec<String>, letter_size: f32) -> HashMap<IVec2, char> {
     let mut result = HashMap::new();
     let num_lines = lines.len();
 
     for (line_idx, line) in lines.iter().enumerate() {
         let num_chars = line.chars().count();
-        let y = (((num_lines - 1) as f32 / 2.0) - line_idx as f32) * LETTER_SIZE as f32;
+        let y = (((num_lines - 1) as f32 / 2.0) - line_idx as f32) * letter_size;
 
         for (char_idx, ch) in line.chars().enumerate() {
-            let x = (char_idx as f32 - (num_chars - 1) as f32 / 2.0) * LETTER_SIZE as f32;
+            let x = (char_idx as f32 - (num_chars - 1) as f32 / 2.0) * letter_size;
             result.insert(IVec2::new(x as i32, y as i32), ch);
         }
     }
@@ -70,6 +70,28 @@ enum LetterState {
     Spawned(char),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Reflect)]
+pub enum AnimatedTextSize {
+    Small,
+    #[default]
+    Medium,
+    Large,
+}
+
+impl AnimatedTextSize {
+    pub fn scale(&self) -> f32 {
+        match self {
+            AnimatedTextSize::Small => 0.5,
+            AnimatedTextSize::Medium => 1.0,
+            AnimatedTextSize::Large => 2.0,
+        }
+    }
+
+    pub fn letter_size(&self) -> f32 {
+        LETTER_SIZE as f32 * self.scale()
+    }
+}
+
 #[derive(Component, Debug)]
 pub struct AnimatedText {
     pub text_system: Option<BoxedSystem<(), String>>,
@@ -77,6 +99,7 @@ pub struct AnimatedText {
     pub text_last_frame: Option<String>,
     pub text_this_frame: String,
     size: UVec2,
+    text_size: AnimatedTextSize,
     char_state: HashMap<IVec2, LetterState>,
 }
 
@@ -88,6 +111,7 @@ impl AnimatedText {
             text_last_frame: None,
             text_this_frame: text.into(),
             size,
+            text_size: AnimatedTextSize::default(),
             char_state: HashMap::new(),
         }
     }
@@ -97,12 +121,17 @@ impl AnimatedText {
         self
     }
 
+    pub fn with_size(mut self, text_size: AnimatedTextSize) -> Self {
+        self.text_size = text_size;
+        self
+    }
+
     fn max_chars_per_line(&self) -> u32 {
-        self.size.x / LETTER_SIZE
+        (self.size.x as f32 / self.text_size.letter_size()) as u32
     }
 
     fn max_lines(&self) -> u32 {
-        self.size.y / LETTER_SIZE
+        (self.size.y as f32 / self.text_size.letter_size()) as u32
     }
 }
 
@@ -153,7 +182,7 @@ fn maybe_reset_char_state(mut query: Query<&mut AnimatedText>) {
             text.max_chars_per_line(),
             text.max_lines(),
         );
-        let char_offsets = get_char_offsets(lines);
+        let char_offsets = get_char_offsets(lines, text.text_size.letter_size());
 
         let mut sorted_offsets: Vec<_> = char_offsets.into_iter().collect();
         sorted_offsets.sort_by(|(a, _), (b, _)| match b.y.cmp(&a.y) {
@@ -201,6 +230,7 @@ fn tick_char_state(
             }
         }
 
+        let scale = text.text_size.scale();
         for (offset, ch) in to_spawn {
             text.char_state.insert(offset, LetterState::Spawned(ch));
 
@@ -209,7 +239,8 @@ fn tick_char_state(
                 parent.spawn((
                     LetterMarker { letter: ch, offset },
                     AnimMan::new(letter_anim),
-                    Transform::from_translation(offset.extend(0).as_vec3()),
+                    Transform::from_translation(offset.extend(0).as_vec3())
+                        .with_scale(Vec3::splat(scale)),
                     Visibility::Inherited,
                 ));
             });
