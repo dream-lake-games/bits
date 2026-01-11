@@ -2,6 +2,7 @@
 extern crate self as bits;
 
 pub mod ai;
+pub mod bg;
 pub mod bits_ui;
 pub mod consts;
 pub mod exa;
