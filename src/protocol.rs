@@ -51,6 +51,10 @@ pub enum ClientInput {
     },
     LockBets,
     VoteContinue,
+    RequestHost,
+    StartGame,
+    AddAI,
+    RemoveAI { username: Username },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Reflect, PartialEq, Default)]
@@ -123,6 +127,11 @@ impl NamedPlayer {
 pub struct PlayerInfo {
     pub unnamed_players: Vec<UnnamedPlayer>,
     pub named_players: Vec<NamedPlayer>,
+}
+
+#[derive(Component, Debug, Clone, Serialize, Deserialize, Reflect, PartialEq, Default)]
+pub struct RoomInfo {
+    pub host_peer_id: Option<PeerId>,
 }
 
 #[derive(Component, Debug, Clone, Serialize, Deserialize, Reflect, PartialEq, Default)]
@@ -279,6 +288,7 @@ impl Plugin for ProtocolPlugin {
         app.register_component::<Name>();
 
         app.register_component::<PlayerInfo>();
+        app.register_component::<RoomInfo>();
         app.register_component::<GameState>();
 
         app.register_component::<Question>();

@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
 
 use bevy::prelude::*;
+use bits::bg::BgMarker;
 use bits::prelude::*;
 use lightyear::{
     input::client::InputSystems,
@@ -13,7 +14,20 @@ use lightyear::{
 };
 use rand::random;
 
-fn simple_client_startup(mut commands: Commands) -> Result<()> {
+use crate::client_state::ClientRoleState;
+
+fn simple_client_startup(mut commands: Commands) {
+    spawn_bloom_camera(&mut commands);
+
+    commands.spawn((
+        Name::new("Background"),
+        BgMarker::default(),
+        Transform::default(),
+        Visibility::Inherited,
+    ));
+}
+
+fn spawn_network_client(mut commands: Commands) -> Result<()> {
     let client_id = random::<u64>();
     let peer_id = PeerId::Netcode(client_id);
 
@@ -24,37 +38,45 @@ fn simple_client_startup(mut commands: Commands) -> Result<()> {
         protocol_id: 0,
     };
 
-    let client = commands
-        .spawn((
-            Client::default(),
-            lightyear::prelude::LocalAddr(CLIENT_ADDR),
-            PeerAddr(SERVER_ADDR),
-            LocalId(peer_id),
-            Link::new(None),
-            ReplicationReceiver::default(),
-            NetcodeClient::new(auth, NetcodeConfig::default())?,
-            WebTransportClientIo {
-                certificate_digest:
-                    "8fd2fbbcb4983dbef6e12b58bb9a0d459b460cab3564dce0fd1041916707c8a8".into(),
-            },
-        ))
-        .id();
-
-    commands.trigger(Connect { entity: client });
-
     commands.spawn((
-        Camera2d,
-        Camera {
-            clear_color: ClearColorConfig::Custom(Color::BLACK),
-            ..default()
+        Client::default(),
+        lightyear::prelude::LocalAddr(CLIENT_ADDR),
+        PeerAddr(SERVER_ADDR),
+        LocalId(peer_id),
+        Link::new(None),
+        ReplicationReceiver::default(),
+        NetcodeClient::new(auth, NetcodeConfig::default())?,
+        WebTransportClientIo {
+            certificate_digest:
+                "2b59b22ccac6cec6720ad85f765b5724cad1f5a0e54ab5ad7b58689e0219dd09".into(),
         },
     ));
 
     Ok(())
 }
 
+fn trigger_connect_when_ready(
+    mut commands: Commands,
+    role_state: Res<State<ClientRoleState>>,
+    client_q: Query<Entity, (With<Client>, Without<Connected>)>,
+    mut connect_triggered: Local<bool>,
+) {
+    if *connect_triggered {
+        return;
+    }
+    if matches!(role_state.get(), ClientRoleState::Selecting) {
+        return;
+    }
+    let Ok(client_entity) = client_q.single() else {
+        return;
+    };
+    info!("[Connect] Triggering connection (role: {:?})", role_state.get());
+    commands.trigger(Connect { entity: client_entity });
+    *connect_triggered = true;
+}
+
 fn handle_client_connected(trigger: On<Add, Connected>, mut commands: Commands) {
-    info!("Client connected, spawning input entity");
+    info!("=== CLIENT CONNECTED TO SERVER ===");
     commands.entity(trigger.entity).insert((
         ActionState::<WrappedClientInput>::default(),
         InputMarker::<WrappedClientInput>::default(),
@@ -85,11 +107,9 @@ fn buffer_input(
     local_id: Query<(&LocalId,), With<Connected>>,
 ) {
     let Ok(mut action_state) = query.single_mut() else {
-        warn!("No action state to write to in client");
         return;
     };
     let Ok(peer_id) = local_id.single().map(|thing| thing.0.0.clone()) else {
-        warn!("No connected peer_id to use to send buffered input");
         return;
     };
 
@@ -100,6 +120,9 @@ fn buffer_input(
         };
         return;
     };
+    if !matches!(next_action, ClientInput::Noop) {
+        info!("[BufferInput] Sending {:?}", next_action);
+    }
     action_state.0 = WrappedClientInput {
         peer_id: Some(peer_id),
         payload: next_action,
@@ -108,7 +131,9 @@ fn buffer_input(
 
 pub fn client_simple_plugin_fn(app: &mut App) {
     app.add_plugins(ClientPlugins::default());
-    app.add_systems(Startup, simple_client_startup);
+    app.add_plugins(bits::bg::bg_plugin_fn);
+    app.add_systems(Startup, (simple_client_startup, spawn_network_client));
+    app.add_systems(Update, trigger_connect_when_ready);
 
     app.add_observer(handle_client_connected);
 

@@ -362,6 +362,11 @@ fn process_game_inputs(
                 }
                 round_cap.continue_locked.insert(username, true);
             }
+
+            ClientInput::RequestHost
+            | ClientInput::StartGame
+            | ClientInput::AddAI
+            | ClientInput::RemoveAI { .. } => {}
         }
     }
 }

@@ -1,14 +1,21 @@
-/// Client state should be _entirely_ depenedent on information received from the server
-/// These state exist as a centralized place to react to the server state and to provide
-/// convenient state hooks to clue in to.
 use bevy::prelude::*;
 use bits::prelude::*;
 use lightyear::prelude::*;
 
-#[derive(States, Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(States, Debug, Clone, PartialEq, Eq, Hash, Default)]
+pub enum ClientRoleState {
+    #[default]
+    Selecting,
+    Host,
+    Player,
+}
+
+#[derive(States, Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub enum ClientConnectionState {
-    None,
+    #[default]
     Disconnected,
+    Connecting,
+    Connected,
     Unnamed,
     Named { username: Username },
 }
@@ -23,22 +30,50 @@ pub enum ClientGameState {
 }
 
 fn update_client_connection_state(
-    connection_q: Query<(&LocalId,), With<Connected>>,
+    role_state: Res<State<ClientRoleState>>,
+    connection_q: Query<&LocalId, With<Connected>>,
+    room_info_q: Query<&RoomInfo>,
     player_info_q: Query<&PlayerInfo>,
+    current_conn_state: Res<State<ClientConnectionState>>,
     mut client_connection_state: ResMut<NextState<ClientConnectionState>>,
 ) {
-    let Ok(player_info) = player_info_q.single() else {
-        warn!("Client is not seeing single player info component...");
+    let Ok(local_id) = connection_q.single() else {
         client_connection_state.set(ClientConnectionState::Disconnected);
         return;
     };
-    let Ok((local_id,)) = connection_q.single() else {
-        trace!("Client is not connected");
-        client_connection_state.set(ClientConnectionState::Disconnected);
+    let peer_id = local_id.0;
+
+    let Ok(room_info) = room_info_q.single() else {
+        if *current_conn_state.get() != ClientConnectionState::Connecting {
+            info!("[ClientState] No RoomInfo yet, transitioning to Connecting");
+        }
+        client_connection_state.set(ClientConnectionState::Connecting);
         return;
     };
 
-    let peer_id = local_id.0;
+    // Host path: never goes through Unnamed/Named - just Connected
+    if *role_state.get() == ClientRoleState::Host {
+        if room_info.host_peer_id == Some(peer_id) {
+            if *current_conn_state.get() != ClientConnectionState::Connected {
+                info!("[ClientState] Host peer_id matches! Transitioning to Connected");
+            }
+            client_connection_state.set(ClientConnectionState::Connected);
+        } else {
+            if *current_conn_state.get() != ClientConnectionState::Connecting {
+                info!("[ClientState] Host waiting for host_peer_id (current: {:?}, ours: {:?})", 
+                    room_info.host_peer_id, peer_id);
+            }
+            client_connection_state.set(ClientConnectionState::Connecting);
+        }
+        return;
+    }
+
+    // Player path: Unnamed → Named
+    let Ok(player_info) = player_info_q.single() else {
+        client_connection_state.set(ClientConnectionState::Connecting);
+        return;
+    };
+
     let is_unnamed = player_info
         .unnamed_players
         .iter()
@@ -50,12 +85,7 @@ fn update_client_connection_state(
 
     let new_state = match (is_unnamed, named_opt) {
         (true, Some(_)) => panic!("A single client peer_id should never be both unnamed and named"),
-        (false, None) => {
-            debug!(
-                "Client is connected but neither unnamed nor named. If this does not resolve in a few RTT, something is borked."
-            );
-            ClientConnectionState::Disconnected
-        }
+        (false, None) => ClientConnectionState::Connecting,
         (true, None) => ClientConnectionState::Unnamed,
         (false, Some(named)) => ClientConnectionState::Named {
             username: named.username.clone(),
@@ -73,7 +103,9 @@ fn update_client_game_state(
 ) {
     if matches!(
         client_connection_state.get(),
-        ClientConnectionState::Disconnected | ClientConnectionState::Unnamed
+        ClientConnectionState::Disconnected
+            | ClientConnectionState::Connecting
+            | ClientConnectionState::Unnamed
     ) {
         client_game_state.set(ClientGameState::None);
         return;
@@ -97,12 +129,13 @@ fn update_client_game_state(
 }
 
 pub fn client_state_plugin_fn(app: &mut App) {
+    app.insert_state(ClientRoleState::Selecting);
     app.insert_state(ClientConnectionState::Disconnected);
     app.insert_state(ClientGameState::None);
 
     app.add_systems(
         FixedUpdate,
         (update_client_connection_state, update_client_game_state)
-            .run_if(not(in_state(ClientConnectionState::None))),
+            .run_if(not(in_state(ClientRoleState::Selecting))),
     );
 }

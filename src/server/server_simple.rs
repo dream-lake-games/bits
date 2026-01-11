@@ -45,7 +45,6 @@ fn server_simple_startup(mut commands: Commands) -> Result<()> {
         .id();
 
     commands.trigger(Start { entity: server });
-    commands.spawn(Camera2d);
 
     commands.spawn((
         Name::new("PlayerInfo"),
@@ -53,6 +52,13 @@ fn server_simple_startup(mut commands: Commands) -> Result<()> {
         Replicate::to_clients(NetworkTarget::All),
     ));
 
+    commands.spawn((
+        Name::new("RoomInfo"),
+        RoomInfo::default(),
+        Replicate::to_clients(NetworkTarget::All),
+    ));
+
+    info!("=== SERVER STARTED ===");
     Ok(())
 }
 
@@ -63,15 +69,40 @@ fn handle_server_started(trigger: On<Add, Started>, mut commands: Commands) {
 }
 
 fn handle_new_client(trigger: On<Add, LinkOf>, mut commands: Commands) {
+    info!("New client connected");
     commands.entity(trigger.entity).insert((
         ReplicationSender::new(Duration::default(), SendUpdatesMode::SinceLastAck, false),
         Name::from("Client"),
     ));
 }
 
+fn check_host_disconnect(
+    room_info_q: Query<&RoomInfo>,
+    connected_remotes_q: Query<&RemoteId, (With<ClientOf>, With<Connected>)>,
+    mut exit: MessageWriter<AppExit>,
+) {
+    let Ok(room_info) = room_info_q.single() else {
+        return;
+    };
+
+    let Some(host_peer_id) = room_info.host_peer_id else {
+        return;
+    };
+
+    let host_still_connected = connected_remotes_q
+        .iter()
+        .any(|remote| remote.0 == host_peer_id);
+
+    if !host_still_connected {
+        info!("Host disconnected, shutting down server");
+        exit.write(AppExit::Success);
+    }
+}
+
 pub fn server_simple_plugin_fn(app: &mut App) {
     app.add_plugins(ServerPlugins::default());
     app.add_systems(Startup, server_simple_startup);
+    app.add_systems(FixedUpdate, check_host_disconnect);
 
     app.add_observer(handle_server_started);
     app.add_observer(handle_new_client);
