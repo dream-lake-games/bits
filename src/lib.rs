@@ -7,6 +7,7 @@ pub mod bits_ui;
 pub mod camera;
 pub mod consts;
 pub mod exa;
+pub mod host;
 pub mod protocol;
 pub mod window;
 

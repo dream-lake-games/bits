@@ -2,7 +2,7 @@ use bevy::input::common_conditions::input_toggle_active;
 use bevy::prelude::*;
 use bevy_egui::EguiPlugin;
 use bevy_inspector_egui::quick::ResourceInspectorPlugin;
-use bits::bg::{BgMarker, BgSettings, bg_plugin_fn};
+use bits::bg::{BgMarker, BgSettings};
 use bits::prelude::*;
 use bits::window::get_window_plugin_with_title;
 
@@ -10,33 +10,21 @@ use bits::window::get_window_plugin_with_title;
 #[derive(Resource, Default)]
 struct PreviousSettings(Option<BgSettings>);
 
-/// Entity ID of the current background marker.
-#[derive(Resource, Default)]
-struct BgMarkerEntity(Option<Entity>);
-
-fn startup(mut commands: Commands, mut bg_entity: ResMut<BgMarkerEntity>) {
+fn startup(mut commands: Commands) {
     spawn_bloom_camera(&mut commands);
-
-    let entity = commands
-        .spawn((
-            Name::new("BgMarker"),
-            BgMarker::default(),
-            Transform::default(),
-            Visibility::Inherited,
-        ))
-        .id();
-
-    bg_entity.0 = Some(entity);
 }
 
 fn detect_settings_change(
     mut commands: Commands,
     settings: Res<BgSettings>,
     mut previous: ResMut<PreviousSettings>,
-    mut bg_entity: ResMut<BgMarkerEntity>,
+    bg_q: Query<Entity, With<BgMarker>>,
 ) {
     let changed = match &previous.0 {
-        None => true,
+        None => {
+            previous.0 = Some(settings.clone());
+            false
+        }
         Some(prev) => {
             prev.star_count != settings.star_count
                 || prev.min_star_spacing != settings.min_star_spacing
@@ -48,20 +36,17 @@ fn detect_settings_change(
     if changed {
         info!("BgSettings changed, respawning background...");
 
-        if let Some(entity) = bg_entity.0 {
+        if let Ok(entity) = bg_q.single() {
             commands.entity(entity).despawn();
         }
 
-        let entity = commands
-            .spawn((
-                Name::new("BgMarker"),
-                BgMarker::default(),
-                Transform::default(),
-                Visibility::Inherited,
-            ))
-            .id();
+        commands.spawn((
+            Name::new("BgMarker"),
+            BgMarker::default(),
+            Transform::default(),
+            Visibility::Inherited,
+        ));
 
-        bg_entity.0 = Some(entity);
         previous.0 = Some(settings.clone());
     }
 }
@@ -76,9 +61,7 @@ fn main() {
         )
         .add_plugins(ResourceInspectorPlugin::<BgSettings>::default())
         .add_plugins(bits_ui_plugin_fn)
-        .add_plugins(bg_plugin_fn)
         .init_resource::<PreviousSettings>()
-        .init_resource::<BgMarkerEntity>()
         .add_systems(Startup, startup)
         .add_systems(Update, detect_settings_change)
         .run();

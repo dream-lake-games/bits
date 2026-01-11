@@ -48,6 +48,22 @@ tokio = { version = "1", features = ["fs", "rt", "rt-multi-thread"] }
 wasm-bindgen = "0.2"
 getrandom = { version = "0.2", features = ["js"] }
 
+[[example]]
+name = "host_waiting"
+path = "examples/host/waiting.rs"
+
+[[example]]
+name = "host_guessing"
+path = "examples/host/guessing.rs"
+
+[[example]]
+name = "host_betting"
+path = "examples/host/betting.rs"
+
+[[example]]
+name = "host_reviewing"
+path = "examples/host/reviewing.rs"
+
 [profile.dev]
 opt-level = 0
 

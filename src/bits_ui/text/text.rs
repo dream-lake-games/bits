@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use bevy::{ecs::system::BoxedSystem, prelude::*};
 use crate::bits_ui::anim::AnimMan;
+use bevy::{ecs::system::BoxedSystem, prelude::*};
 
 use super::letters::{LETTER_SIZE, char_to_letter_anim};
 
@@ -162,9 +162,21 @@ fn maybe_reset_char_state(mut query: Query<&mut AnimatedText>) {
         });
 
         let mut new_char_state = HashMap::new();
-        for (idx, (offset, ch)) in sorted_offsets.into_iter().enumerate() {
-            let delay = idx as f32 * text.seconds_per_char;
-            new_char_state.insert(offset, LetterState::Pending(ch, delay));
+        let mut pending_count = 0u32;
+
+        for (offset, ch) in sorted_offsets.into_iter() {
+            let already_spawned = matches!(
+                text.char_state.get(&offset),
+                Some(LetterState::Spawned(existing_ch)) if *existing_ch == ch
+            );
+
+            if already_spawned {
+                new_char_state.insert(offset, LetterState::Spawned(ch));
+            } else {
+                let delay = pending_count as f32 * text.seconds_per_char;
+                new_char_state.insert(offset, LetterState::Pending(ch, delay));
+                pending_count += 1;
+            }
         }
 
         text.char_state = new_char_state;

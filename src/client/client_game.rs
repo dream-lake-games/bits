@@ -5,7 +5,7 @@ use bits::prelude::*;
 
 use crate::{
     client_simple::InputsQueue,
-    client_state::{ClientConnectionState, ClientGameState},
+    client_state::{ClientConnectionState, ClientGameState, ClientRoleState},
 };
 
 #[derive(Component)]
@@ -885,33 +885,58 @@ fn on_exit_reviewing(cleanup_q: Query<Entity, With<ReviewingCleanup>>, mut comma
 }
 
 pub fn client_game_plugin_fn(app: &mut App) {
+    // Player-only game UI (interactive phone UI)
     app.add_systems(
         OnEnter(ClientGameState::WaitingForQuestion),
-        on_enter_waiting_for_question,
+        on_enter_waiting_for_question.run_if(in_state(ClientRoleState::Player)),
     );
     app.add_systems(
         OnExit(ClientGameState::WaitingForQuestion),
-        on_exit_waiting_for_question,
+        on_exit_waiting_for_question.run_if(in_state(ClientRoleState::Player)),
     );
 
-    app.add_systems(OnEnter(ClientGameState::Guessing), on_enter_guessing);
+    app.add_systems(
+        OnEnter(ClientGameState::Guessing),
+        on_enter_guessing.run_if(in_state(ClientRoleState::Player)),
+    );
     app.add_systems(
         FixedUpdate,
-        update_guessing.run_if(in_state(ClientGameState::Guessing)),
+        update_guessing
+            .run_if(in_state(ClientGameState::Guessing))
+            .run_if(in_state(ClientRoleState::Player)),
     );
-    app.add_systems(OnExit(ClientGameState::Guessing), on_exit_guessing);
+    app.add_systems(
+        OnExit(ClientGameState::Guessing),
+        on_exit_guessing.run_if(in_state(ClientRoleState::Player)),
+    );
 
-    app.add_systems(OnEnter(ClientGameState::Betting), on_enter_betting);
+    app.add_systems(
+        OnEnter(ClientGameState::Betting),
+        on_enter_betting.run_if(in_state(ClientRoleState::Player)),
+    );
     app.add_systems(
         FixedUpdate,
-        update_betting.run_if(in_state(ClientGameState::Betting)),
+        update_betting
+            .run_if(in_state(ClientGameState::Betting))
+            .run_if(in_state(ClientRoleState::Player)),
     );
-    app.add_systems(OnExit(ClientGameState::Betting), on_exit_betting);
+    app.add_systems(
+        OnExit(ClientGameState::Betting),
+        on_exit_betting.run_if(in_state(ClientRoleState::Player)),
+    );
 
-    app.add_systems(OnEnter(ClientGameState::Reviewing), on_enter_reviewing);
+    app.add_systems(
+        OnEnter(ClientGameState::Reviewing),
+        on_enter_reviewing.run_if(in_state(ClientRoleState::Player)),
+    );
     app.add_systems(
         FixedUpdate,
-        update_reviewing.run_if(in_state(ClientGameState::Reviewing)),
+        update_reviewing
+            .run_if(in_state(ClientGameState::Reviewing))
+            .run_if(in_state(ClientRoleState::Player)),
     );
-    app.add_systems(OnExit(ClientGameState::Reviewing), on_exit_reviewing);
+    app.add_systems(
+        OnExit(ClientGameState::Reviewing),
+        on_exit_reviewing.run_if(in_state(ClientRoleState::Player)),
+    );
 }

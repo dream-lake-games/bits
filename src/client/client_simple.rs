@@ -1,7 +1,6 @@
 use std::collections::VecDeque;
 
 use bevy::prelude::*;
-use bits::bg::BgMarker;
 use bits::prelude::*;
 use lightyear::{
     input::client::InputSystems,
@@ -18,13 +17,6 @@ use crate::client_state::ClientRoleState;
 
 fn simple_client_startup(mut commands: Commands) {
     spawn_bloom_camera(&mut commands);
-
-    commands.spawn((
-        Name::new("Background"),
-        BgMarker::default(),
-        Transform::default(),
-        Visibility::Inherited,
-    ));
 }
 
 fn spawn_network_client(mut commands: Commands) -> Result<()> {
@@ -47,8 +39,8 @@ fn spawn_network_client(mut commands: Commands) -> Result<()> {
         ReplicationReceiver::default(),
         NetcodeClient::new(auth, NetcodeConfig::default())?,
         WebTransportClientIo {
-            certificate_digest:
-                "2b59b22ccac6cec6720ad85f765b5724cad1f5a0e54ab5ad7b58689e0219dd09".into(),
+            certificate_digest: "2b59b22ccac6cec6720ad85f765b5724cad1f5a0e54ab5ad7b58689e0219dd09"
+                .into(),
         },
     ));
 
@@ -70,8 +62,13 @@ fn trigger_connect_when_ready(
     let Ok(client_entity) = client_q.single() else {
         return;
     };
-    info!("[Connect] Triggering connection (role: {:?})", role_state.get());
-    commands.trigger(Connect { entity: client_entity });
+    info!(
+        "[Connect] Triggering connection (role: {:?})",
+        role_state.get()
+    );
+    commands.trigger(Connect {
+        entity: client_entity,
+    });
     *connect_triggered = true;
 }
 
@@ -131,7 +128,6 @@ fn buffer_input(
 
 pub fn client_simple_plugin_fn(app: &mut App) {
     app.add_plugins(ClientPlugins::default());
-    app.add_plugins(bits::bg::bg_plugin_fn);
     app.add_systems(Startup, (simple_client_startup, spawn_network_client));
     app.add_systems(Update, trigger_connect_when_ready);
 

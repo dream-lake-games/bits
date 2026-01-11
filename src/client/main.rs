@@ -6,9 +6,12 @@ use bits::protocol::ProtocolPlugin;
 use bits::window::get_window_plugin_with_title;
 
 mod client_game;
+mod client_game_host;
 mod client_lobby;
 mod client_simple;
 mod client_state;
+mod host;
+mod player;
 
 fn main() {
     let mut app = App::new();
@@ -27,9 +30,12 @@ fn main() {
         ProtocolPlugin,
         bits_ui_plugin_fn,
         client_game::client_game_plugin_fn,
+        client_game_host::client_game_host_plugin_fn,
         client_lobby::client_lobby_plugin_fn,
         client_simple::client_simple_plugin_fn,
         client_state::client_state_plugin_fn,
+        host::host_lobby_plugin_fn,
+        player::player_lobby_plugin_fn,
     ));
 
     app.run();

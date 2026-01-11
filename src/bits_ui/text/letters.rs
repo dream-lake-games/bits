@@ -1,5 +1,5 @@
-use bevy::prelude::*;
 use crate::LetterAnim;
+use bevy::prelude::*;
 
 pub const LETTER_SIZE: u32 = 32;
 
@@ -73,6 +73,18 @@ pub fn char_to_letter_anim(c: char) -> LetterAnim {
         '+' => LetterAnim::Plus,
         '-' => LetterAnim::Minus,
         '*' => LetterAnim::Star,
+        ',' => LetterAnim::Comma,
+        '.' => LetterAnim::Period,
+        '?' => LetterAnim::Question,
+        ':' => LetterAnim::Colon,
+        '(' => LetterAnim::OpenParen,
+        ')' => LetterAnim::CloseParen,
+        '%' => LetterAnim::Percent,
+        '$' => LetterAnim::Money,
+        '!' => LetterAnim::Exclaim,
+        '\'' | '\u{2018}' | '\u{2019}' => LetterAnim::Squote,
+        '"' | '\u{201C}' | '\u{201D}' => LetterAnim::Dquote,
+        '_' => LetterAnim::Space, // Renders as space but doesn't break words
         _ => {
             warn!("Unknown character '{}', using Space", c);
             LetterAnim::Space

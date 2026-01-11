@@ -97,16 +97,24 @@ fn update_client_connection_state(
 fn update_client_game_state(
     client_connection_state: Res<State<ClientConnectionState>>,
     mut client_game_state: ResMut<NextState<ClientGameState>>,
+    game_state_q: Query<Entity, With<GameState>>,
     question_active: Query<Entity, With<QuestionActive>>,
     bets_active: Query<Entity, With<BetsActive>>,
     round_cap: Query<Entity, With<RoundCap>>,
 ) {
+    // Must be connected (host) or named (player) to have game state
     if matches!(
         client_connection_state.get(),
         ClientConnectionState::Disconnected
             | ClientConnectionState::Connecting
             | ClientConnectionState::Unnamed
     ) {
+        client_game_state.set(ClientGameState::None);
+        return;
+    }
+
+    // Game must be started (GameState entity must exist)
+    if game_state_q.is_empty() {
         client_game_state.set(ClientGameState::None);
         return;
     }

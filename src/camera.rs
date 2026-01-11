@@ -31,5 +31,3 @@ pub fn spawn_bloom_camera(commands: &mut Commands) -> Entity {
 pub fn spawn_bloom_camera_system(mut commands: Commands) {
     spawn_bloom_camera(&mut commands);
 }
-
-
