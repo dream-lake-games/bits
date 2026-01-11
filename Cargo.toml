@@ -11,12 +11,10 @@ path = "src/client/main.rs"
 name = "server"
 path = "src/server/main.rs"
 
-[[example]]
-name = "text"
-path = "examples/text/main.rs"
+[build-dependencies]
+toml = "0.8"
 
 [dependencies]
-macros = { path = "macros" }
 bevy = { version = "0.17.3", features = ["track_location"] }
 bevy_egui = "0.38"
 bevy-inspector-egui = "0.35.0"

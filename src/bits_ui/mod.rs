@@ -10,11 +10,11 @@ pub mod text;
 pub mod text_simple;
 
 pub use anim::{Anim, AnimConfig, AnimMan, AnimNextIndex, AnimPlugin, AnimVariant};
-pub use assemble::{Assemblable, Assemble};
+pub use assemble::Assemble;
 pub use button_simple::{ButtonSimple, ButtonSimpleDrawState};
 pub use flex_simple::FlexSimple;
 pub use spacer::Spacer;
-pub use text::{AnimatedText, BUTTON_SIZE, Button, ButtonAnim, LETTER_SIZE, LetterAnim};
+pub use text::{AnimatedText, BUTTON_SIZE, Button, LETTER_SIZE};
 pub use text_simple::TextSimple;
 
 pub fn bits_ui_plugin_fn(app: &mut App) {
@@ -26,7 +26,5 @@ pub fn bits_ui_plugin_fn(app: &mut App) {
         text_simple::text_simple_plugin_fn,
         text::text_plugin_fn,
         text::button_plugin_fn,
-        LetterAnim::plugin,
-        ButtonAnim::plugin,
     ));
 }

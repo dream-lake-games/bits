@@ -57,7 +57,7 @@ impl Plugin for AnimPlugin {
                 default_fps: self.default_fps,
             });
         }
-        register_all_anims(app);
+        crate::register_all_anims(app);
     }
 }
 
@@ -77,6 +77,8 @@ pub struct AnimMan<A: Anim> {
     pub paused: bool,
     pub visible: bool,
     pub color: Color,
+    pub flip_x: bool,
+    pub flip_y: bool,
     _phantom: PhantomData<A>,
 }
 
@@ -92,6 +94,8 @@ impl<A: Anim> AnimMan<A> {
             paused: false,
             visible: true,
             color: Color::WHITE,
+            flip_x: false,
+            flip_y: false,
             _phantom: PhantomData,
         }
     }
@@ -111,6 +115,16 @@ impl<A: Anim> AnimMan<A> {
         self
     }
 
+    pub fn with_flip_x(mut self, flip_x: bool) -> Self {
+        self.flip_x = flip_x;
+        self
+    }
+
+    pub fn with_flip_y(mut self, flip_y: bool) -> Self {
+        self.flip_y = flip_y;
+        self
+    }
+
     pub fn set(&mut self, value: A) {
         self.variant_index = value.index();
         self.frame = 0;
@@ -119,6 +133,14 @@ impl<A: Anim> AnimMan<A> {
 
     pub fn set_color(&mut self, color: Color) {
         self.color = color;
+    }
+
+    pub fn set_flip_x(&mut self, flip_x: bool) {
+        self.flip_x = flip_x;
+    }
+
+    pub fn set_flip_y(&mut self, flip_y: bool) {
+        self.flip_y = flip_y;
     }
 
     pub fn get(&self) -> A {
@@ -136,6 +158,8 @@ fn on_add_anim_man<A: Anim>(mut world: DeferredWorld, ctx: HookContext) {
     let frame = state.frame;
     let visible = state.visible;
     let color = state.color;
+    let flip_x = state.flip_x;
+    let flip_y = state.flip_y;
 
     let asset_server = world.resource::<AssetServer>();
     let image_handle: Handle<Image> = asset_server.load(variant.asset_path);
@@ -166,6 +190,8 @@ fn on_add_anim_man<A: Anim>(mut world: DeferredWorld, ctx: HookContext) {
             Sprite {
                 image: image_handle,
                 color,
+                flip_x,
+                flip_y,
                 texture_atlas: Some(TextureAtlas {
                     layout: layout_handle,
                     index: frame,
@@ -234,6 +260,8 @@ fn tick_anim_typed<A: Anim>(
             Visibility::Hidden
         };
         sprite.color = state.color;
+        sprite.flip_x = state.flip_x;
+        sprite.flip_y = state.flip_y;
 
         if state.variant_index != state.loaded_variant_index {
             load_variant_sprite(&mut state, &mut sprite, &asset_server, &mut layouts);
@@ -283,5 +311,3 @@ fn tick_anim_typed<A: Anim>(
 pub fn register_anim<A: Anim>(app: &mut App) {
     app.add_systems(Update, tick_anim_typed::<A>);
 }
-
-include!(concat!(env!("OUT_DIR"), "/anim_registry.rs"));

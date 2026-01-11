@@ -1,0 +1,9 @@
+[[anim]]
+name = "ButtonAnim"
+file = "assets/play/button.aseprite"
+default = "Idle"
+
+[[anim]]
+name = "LetterAnim"
+file = "assets/play/letters.aseprite"
+default = "Space"

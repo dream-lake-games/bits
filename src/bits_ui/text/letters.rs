@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use macros::*;
+use crate::LetterAnim;
 
 pub const LETTER_SIZE: u32 = 32;
 
@@ -79,10 +79,3 @@ pub fn char_to_letter_anim(c: char) -> LetterAnim {
         }
     }
 }
-
-exhaust_anim_enum!(
-    pub enum LetterAnim,
-    file: "assets/play/letters.aseprite",
-    exclude: "_",
-    default: Space,
-);

@@ -1,20 +1,11 @@
 use bevy::ecs::system::BoxedSystem;
 use bevy::ecs::{lifecycle::HookContext, world::DeferredWorld};
 use bevy::prelude::*;
-use bits::prelude::*;
-
-use macros::*;
-
+use crate::{ButtonAnim, LetterAnim};
+use crate::bits_ui::anim::AnimMan;
 use crate::bits_ui::colors::Palatte;
 
 pub const BUTTON_SIZE: u32 = 64;
-
-exhaust_anim_enum!(
-    pub enum ButtonAnim,
-    file: "assets/play/button.aseprite",
-    exclude: "_",
-    default: Idle,
-);
 
 impl PartialEq for ButtonAnim {
     fn eq(&self, other: &Self) -> bool {
@@ -87,22 +78,15 @@ fn on_add_button(mut world: DeferredWorld, hook: HookContext) {
     let letter = button.letter;
     let entity = hook.entity;
 
-    // Add AnimMan<ButtonAnim> to the button entity itself
     world
         .commands()
         .entity(entity)
         .insert(AnimMan::new(ButtonAnim::Idle));
 
-    // Spawn the letter as a child with the assemble animation
-    // z=1.0 ensures the letter renders in front of the button sprite
     world.commands().entity(entity).with_children(|parent| {
         parent.spawn((
             ButtonLetterAnimChild,
-            Assemble::new()
-                .with_anim_variant(letter)
-                .with_lifespan(0.3)
-                .with_min_radius(20)
-                .with_max_radius(40),
+            AnimMan::new(letter),
             Transform::from_xyz(0.0, 0.0, 1.0),
             Visibility::Inherited,
         ));
@@ -142,7 +126,6 @@ fn update_button_disabled_state(world: &mut World) {
         }
     }
 
-    // Reset disabled state for buttons without disabled_system
     let mut query = world.query::<&mut Button>();
     for mut button in query.iter_mut(world) {
         if button.disabled_system.is_none() {
@@ -161,7 +144,6 @@ fn update_button_mouse_state(
         return;
     };
     let Some(cursor_pos) = window.cursor_position() else {
-        // No cursor in window - set all non-disabled to idle
         for (_, mut button, mut anim) in buttons.iter_mut() {
             if !button.is_disabled {
                 let new_state = ButtonAnim::Idle;
@@ -183,7 +165,6 @@ fn update_button_mouse_state(
     let lmb_pressed = mouse.pressed(MouseButton::Left);
 
     for (transform, mut button, mut anim) in buttons.iter_mut() {
-        // Handle disabled state
         if button.is_disabled {
             if button.last_state != ButtonAnim::Disabled {
                 button.last_state = ButtonAnim::Disabled;
@@ -208,12 +189,10 @@ fn update_button_mouse_state(
             ButtonAnim::Hover
         };
 
-        // Detect press trigger: transitioning into Press
         if new_state == ButtonAnim::Press && button.last_state != ButtonAnim::Press {
             button.trigger_press_this_frame = true;
         }
 
-        // Detect release trigger: was Press, now Hover (released while over button)
         if button.last_state == ButtonAnim::Press && new_state == ButtonAnim::Hover {
             button.trigger_release_this_frame = true;
         }
@@ -256,7 +235,6 @@ fn react_to_triggers(world: &mut World) {
         }
     }
 
-    // Reset triggers
     {
         let mut query = world.query::<&mut Button>();
         for mut button in query.iter_mut(world) {
@@ -265,7 +243,6 @@ fn react_to_triggers(world: &mut World) {
         }
     }
 
-    // Run press callbacks
     for entity in press_callbacks {
         let system_opt = world
             .get_mut::<Button>(entity)
@@ -285,7 +262,6 @@ fn react_to_triggers(world: &mut World) {
         }
     }
 
-    // Run release callbacks
     for entity in release_callbacks {
         let system_opt = world
             .get_mut::<Button>(entity)

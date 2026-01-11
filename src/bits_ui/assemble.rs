@@ -1,10 +1,8 @@
-use super::anim::{Anim, AnimMan};
 use bevy::{
-    ecs::{lifecycle::HookContext, world::DeferredWorld, world::EntityWorldMut},
+    ecs::{lifecycle::HookContext, world::DeferredWorld},
     prelude::*,
 };
 use rand::{Rng, thread_rng};
-use std::sync::Arc;
 
 fn cubic_ease_out(t: f32) -> f32 {
     1.0 - (1.0 - t).powi(3)
@@ -17,6 +15,7 @@ struct Pixel {
     color_start: Color,
     color_end: Color,
 }
+
 impl Pixel {
     fn new(transform_start: Transform, transform_end: Transform) -> Self {
         Self {
@@ -43,8 +42,6 @@ impl Pixel {
 #[relationship(relationship_target = Assemble)]
 pub struct PixelOf(Entity);
 
-type AnimCallback = Arc<dyn Fn(Entity, &mut Commands) + Send + Sync>;
-
 #[derive(Component)]
 #[relationship_target(relationship = PixelOf, linked_spawn)]
 #[component(on_add = on_add_assemble)]
@@ -56,8 +53,6 @@ pub struct Assemble {
     pixel_locations: Vec<IVec2>,
     #[relationship]
     pixels: Vec<Entity>,
-    on_spawn_anim: Option<AnimCallback>,
-    on_assembled: Option<AnimCallback>,
 }
 
 impl Assemble {
@@ -69,46 +64,11 @@ impl Assemble {
             max_radius: 100,
             pixel_locations: vec![],
             pixels: vec![],
-            on_spawn_anim: None,
-            on_assembled: None,
         }
     }
 
-    pub fn with_anim<A: Anim + Assemblable + Default>(mut self) -> Self {
-        self.pixel_locations = A::get_pixel_locations();
-        self.on_spawn_anim = Some(Arc::new(|entity, commands| {
-            commands.entity(entity).insert(
-                AnimMan::new(A::default())
-                    .with_paused(true)
-                    .with_visible(false),
-            );
-        }));
-        self.on_assembled = Some(Arc::new(|entity, commands| {
-            commands.entity(entity).queue(|mut entity: EntityWorldMut| {
-                if let Some(mut anim) = entity.get_mut::<AnimMan<A>>() {
-                    anim.paused = false;
-                    anim.visible = true;
-                }
-            });
-        }));
-        self
-    }
-
-    pub fn with_anim_variant<A: Anim + Assemblable>(mut self, variant: A) -> Self {
-        self.pixel_locations = A::get_pixel_locations();
-        self.on_spawn_anim = Some(Arc::new(move |entity, commands| {
-            commands
-                .entity(entity)
-                .insert(AnimMan::new(variant).with_paused(true).with_visible(false));
-        }));
-        self.on_assembled = Some(Arc::new(|entity, commands| {
-            commands.entity(entity).queue(|mut entity: EntityWorldMut| {
-                if let Some(mut anim) = entity.get_mut::<AnimMan<A>>() {
-                    anim.paused = false;
-                    anim.visible = true;
-                }
-            });
-        }));
+    pub fn with_pixel_locations(mut self, locations: Vec<IVec2>) -> Self {
+        self.pixel_locations = locations;
         self
     }
 
@@ -127,18 +87,13 @@ impl Assemble {
         self.lifespan = Some(lifespan);
         self
     }
-
-    pub fn with_assemblable<T: Assemblable>(mut self) -> Self {
-        self.pixel_locations = T::get_pixel_locations();
-        self
-    }
 }
+
 fn on_add_assemble(mut world: DeferredWorld, hook: HookContext) {
     let assemble = world.get::<Assemble>(hook.entity).unwrap();
     let pixel_locations = assemble.pixel_locations.clone();
     let min_radius = assemble.min_radius;
     let max_radius = assemble.max_radius;
-    let has_on_spawn_anim = assemble.on_spawn_anim.is_some();
 
     let transform = world.get::<Transform>(hook.entity).cloned().unwrap();
 
@@ -167,22 +122,6 @@ fn on_add_assemble(mut world: DeferredWorld, hook: HookContext) {
             ));
         }
     });
-
-    if has_on_spawn_anim {
-        world.commands().queue(move |world: &mut World| {
-            let callback = world
-                .get::<Assemble>(entity)
-                .and_then(|a| a.on_spawn_anim.clone());
-            if let Some(callback) = callback {
-                let mut commands = world.commands();
-                callback(entity, &mut commands);
-            }
-        });
-    }
-}
-
-pub trait Assemblable {
-    fn get_pixel_locations() -> Vec<IVec2>;
 }
 
 fn update_assembles(
@@ -195,9 +134,6 @@ fn update_assembles(
         if assemble.lifespan.is_none() {
             for pixel_eid in assemble.iter() {
                 commands.entity(pixel_eid).despawn();
-            }
-            if let Some(ref on_assembled) = assemble.on_assembled {
-                on_assembled(assemble_eid, &mut commands);
             }
             commands.entity(assemble_eid).remove::<Assemble>();
             continue;

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use bevy::{ecs::system::BoxedSystem, prelude::*};
-use bits::prelude::*;
+use crate::bits_ui::anim::AnimMan;
 
 use super::letters::{LETTER_SIZE, char_to_letter_anim};
 
@@ -30,7 +30,6 @@ fn split_text_into_lines(text: String, max_chars_per_line: u32, max_lines: u32) 
         }
     }
 
-    // Push the last line
     if !current_line.is_empty() {
         result.push(current_line);
     }
@@ -48,11 +47,9 @@ fn get_char_offsets(lines: Vec<String>) -> HashMap<IVec2, char> {
 
     for (line_idx, line) in lines.iter().enumerate() {
         let num_chars = line.chars().count();
-        // Positive y is up, so top line (idx 0) has highest y
         let y = (((num_lines - 1) as f32 / 2.0) - line_idx as f32) * LETTER_SIZE as f32;
 
         for (char_idx, ch) in line.chars().enumerate() {
-            // Center horizontally
             let x = (char_idx as f32 - (num_chars - 1) as f32 / 2.0) * LETTER_SIZE as f32;
             result.insert(IVec2::new(x as i32, y as i32), ch);
         }
@@ -151,7 +148,6 @@ fn maybe_reset_char_state(mut query: Query<&mut AnimatedText>) {
             continue;
         }
 
-        // Calculate char offsets
         let lines = split_text_into_lines(
             text.text_this_frame.clone(),
             text.max_chars_per_line(),
@@ -159,15 +155,12 @@ fn maybe_reset_char_state(mut query: Query<&mut AnimatedText>) {
         );
         let char_offsets = get_char_offsets(lines);
 
-        // Sort offsets by reading order (top-to-bottom, left-to-right)
-        // y descending (higher y = top), then x ascending
         let mut sorted_offsets: Vec<_> = char_offsets.into_iter().collect();
         sorted_offsets.sort_by(|(a, _), (b, _)| match b.y.cmp(&a.y) {
             std::cmp::Ordering::Equal => a.x.cmp(&b.x),
             other => other,
         });
 
-        // Build char_state with staggered delays
         let mut new_char_state = HashMap::new();
         for (idx, (offset, ch)) in sorted_offsets.into_iter().enumerate() {
             let delay = idx as f32 * text.seconds_per_char;
@@ -203,11 +196,7 @@ fn tick_char_state(
             commands.entity(entity).with_children(|parent| {
                 parent.spawn((
                     LetterMarker { letter: ch, offset },
-                    Assemble::new()
-                        .with_anim_variant(letter_anim)
-                        .with_lifespan(0.3)
-                        .with_min_radius(20)
-                        .with_max_radius(40),
+                    AnimMan::new(letter_anim),
                     Transform::from_translation(offset.extend(0).as_vec3()),
                     Visibility::Inherited,
                 ));

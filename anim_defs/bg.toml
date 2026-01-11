@@ -1,0 +1,10 @@
+[[anim]]
+name = "BgAnim"
+file = "assets/bg/bg_world.aseprite"
+default = "Idle"
+
+[[anim]]
+name = "StarAnim"
+file = "assets/bg/star.aseprite"
+default = "S1Small"
+next = { ShootSexy = "DESPAWN", ShootDownrish = "DESPAWN", ShootDown = "DESPAWN", ShootDownLong = "DESPAWN", ShootDiagonalLong = "DESPAWN" }

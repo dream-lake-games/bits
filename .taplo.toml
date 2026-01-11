@@ -1,0 +1,7 @@
+[[rule]]
+include = ["anim_defs/*.toml"]
+
+[rule.schema]
+path = "anim_defs/anim.schema.json"
+
+
