@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use bits::bits_ui::text::char_to_letter_anim;
-use bits::bits_ui::text::Button as SpriteButton;
+use bits::bits_ui::text::AnimButton as SpriteButton;
 use bits::prelude::*;
 
 use crate::client_simple::InputsQueue;

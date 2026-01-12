@@ -2,6 +2,7 @@ use bevy::{
     ecs::{lifecycle::HookContext, world::DeferredWorld},
     prelude::*,
 };
+use rand::{Rng, thread_rng};
 use std::marker::PhantomData;
 
 #[derive(Component)]
@@ -74,6 +75,8 @@ pub struct AnimMan<A: Anim> {
     loaded_variant_index: usize,
     frame: usize,
     timer: f32,
+    stutter: Option<(f32, f32)>,
+    fps_override: Option<f32>,
     pub paused: bool,
     pub visible: bool,
     pub color: Color,
@@ -91,6 +94,8 @@ impl<A: Anim> AnimMan<A> {
             loaded_variant_index: index,
             frame: 0,
             timer: 0.0,
+            stutter: None,
+            fps_override: None,
             paused: false,
             visible: true,
             color: Color::WHITE,
@@ -125,6 +130,16 @@ impl<A: Anim> AnimMan<A> {
         self
     }
 
+    pub fn with_stutter(mut self, min: f32, max: f32) -> Self {
+        self.stutter = Some((min, max));
+        self
+    }
+
+    pub fn with_fps(mut self, fps: f32) -> Self {
+        self.fps_override = Some(fps);
+        self
+    }
+
     pub fn set(&mut self, value: A) {
         self.variant_index = value.index();
         self.frame = 0;
@@ -141,6 +156,14 @@ impl<A: Anim> AnimMan<A> {
 
     pub fn set_flip_y(&mut self, flip_y: bool) {
         self.flip_y = flip_y;
+    }
+
+    pub fn set_stutter(&mut self, stutter: Option<(f32, f32)>) {
+        self.stutter = stutter;
+    }
+
+    pub fn set_fps(&mut self, fps: Option<f32>) {
+        self.fps_override = fps;
     }
 
     pub fn get(&self) -> A {
@@ -272,10 +295,16 @@ fn tick_anim_typed<A: Anim>(
         }
 
         let variant = state.current();
-        let fps = variant.fps.unwrap_or(config.default_fps);
+        let fps = state.fps_override.or(variant.fps).unwrap_or(config.default_fps);
         let frame_duration = 1.0 / fps;
 
-        state.timer += time.delta_secs();
+        let delta = time.delta_secs();
+        let stutter_offset = if let Some((min, max)) = state.stutter {
+            thread_rng().gen_range(min..=max) * delta
+        } else {
+            0.0
+        };
+        state.timer = (state.timer + delta + stutter_offset).max(0.0);
 
         while state.timer >= frame_duration {
             state.timer -= frame_duration;

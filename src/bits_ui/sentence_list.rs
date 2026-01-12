@@ -80,8 +80,12 @@ fn spawn_sentence_children(commands: &mut Commands, entity: Entity, list: &Sente
             parent.spawn((
                 Name::new(format!("Sentence_{}", index)),
                 SentenceRow { index },
-                AnimatedText::new(sentence, UVec2::new(width, letter_size as u32), list.text_speed())
-                    .with_size(list.text_size),
+                AnimatedText::new(
+                    sentence,
+                    UVec2::new(width, letter_size as u32),
+                    list.text_speed(),
+                )
+                .with_size(list.text_size),
                 Transform::from_xyz(0.0, y, 0.0),
                 Visibility::Inherited,
             ));

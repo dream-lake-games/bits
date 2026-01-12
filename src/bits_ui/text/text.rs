@@ -238,7 +238,7 @@ fn tick_char_state(
             commands.entity(entity).with_children(|parent| {
                 parent.spawn((
                     LetterMarker { letter: ch, offset },
-                    AnimMan::new(letter_anim),
+                    AnimMan::new(letter_anim).with_stutter(-0.1, 0.1),
                     Transform::from_translation(offset.extend(0).as_vec3())
                         .with_scale(Vec3::splat(scale)),
                     Visibility::Inherited,

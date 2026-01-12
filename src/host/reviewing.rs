@@ -104,12 +104,16 @@ impl ReviewingScreen {
     }
 
     fn correct_text(&self) -> String {
+        format!("CORRECT: {}", self.answer)
+    }
+
+    fn submitted_by_text(&self) -> String {
         if self.winning_guessers.is_empty() {
-            format!("CORRECT: {}", self.answer)
+            "(OWNER:)".to_string()
         } else {
             let mut guessers = self.winning_guessers.clone();
             guessers.sort();
-            format!("CORRECT: {} ({})", self.answer, guessers.join(", "))
+            format!("(OWNER: {})", guessers.join(", "))
         }
     }
 
@@ -149,6 +153,9 @@ struct ReviewingContinueText;
 struct ReviewingCorrectText;
 
 #[derive(Component)]
+struct ReviewingSubmittedByText;
+
+#[derive(Component)]
 struct ReviewingScoresList;
 
 fn handle_reviewing_screen_added(
@@ -170,39 +177,53 @@ fn handle_reviewing_screen_added(
             Visibility::Inherited,
         ));
 
-        // Timer: 800x40 area, center at y=80
+        // Correct: 768x40 area (medium), center at y=80
         parent.spawn((
-            Name::new("Timer"),
-            ReviewingTimerText,
-            AnimatedText::new(&screen.timer_text(), UVec2::new(256, 32), TEXT_SPEED),
+            Name::new("Correct"),
+            ReviewingCorrectText,
+            AnimatedText::new(&screen.correct_text(), UVec2::new(768, 40), TEXT_SPEED),
             Transform::from_xyz(0.0, 80.0, 0.0),
             Visibility::Inherited,
         ));
 
-        // Continue: 800x40 area, center at y=40
+        // Submitted by: 768x20 area (small), center at y=50
+        parent.spawn((
+            Name::new("SubmittedBy"),
+            ReviewingSubmittedByText,
+            AnimatedText::new(&screen.submitted_by_text(), UVec2::new(768, 20), TEXT_SPEED)
+                .with_size(AnimatedTextSize::Small),
+            Transform::from_xyz(0.0, 50.0, 0.0),
+            Visibility::Inherited,
+        ));
+
+        // Timer: 256x20 area, center at y=4
+        parent.spawn((
+            Name::new("Timer"),
+            ReviewingTimerText,
+            AnimatedText::new(&screen.timer_text(), UVec2::new(256, 20), TEXT_SPEED)
+                .with_size(AnimatedTextSize::Small),
+            Transform::from_xyz(0.0, 4.0, 0.0),
+            Visibility::Inherited,
+        ));
+
+        // Continue: 768x20 area, center at y=-21
         parent.spawn((
             Name::new("Continue"),
             ReviewingContinueText,
-            AnimatedText::new(&screen.continue_text(), UVec2::new(768, 32), TEXT_SPEED),
-            Transform::from_xyz(0.0, 40.0, 0.0),
+            AnimatedText::new(&screen.continue_text(), UVec2::new(768, 20), TEXT_SPEED)
+                .with_size(AnimatedTextSize::Small),
+            Transform::from_xyz(0.0, -21.0, 0.0),
             Visibility::Inherited,
         ));
 
-        // Correct: 800x40 area, center at y=0
-        parent.spawn((
-            Name::new("Correct"),
-            ReviewingCorrectText,
-            AnimatedText::new(&screen.correct_text(), UVec2::new(768, 32), TEXT_SPEED),
-            Transform::from_xyz(0.0, 0.0, 0.0),
-            Visibility::Inherited,
-        ));
-
-        // Scores list: full 800px width, center at y=-130
+        // Scores list: full 800px width, center at y=-100
         parent.spawn((
             Name::new("ScoresList"),
             ReviewingScoresList,
-            SentenceList::new(screen.scores_sentences()).with_text_speed(TEXT_SPEED),
-            Transform::from_xyz(0.0, -130.0, 0.0),
+            SentenceList::new(screen.scores_sentences())
+                .with_text_speed(TEXT_SPEED)
+                .with_size(AnimatedTextSize::Small),
+            Transform::from_xyz(0.0, -100.0, 0.0),
             Visibility::Inherited,
         ));
     });
@@ -232,6 +253,16 @@ fn update_reviewing_screen(
             Without<ReviewingContinueText>,
         ),
     >,
+    mut submitted_by_q: Query<
+        &mut AnimatedText,
+        (
+            With<ReviewingSubmittedByText>,
+            Without<ReviewingQuestionText>,
+            Without<ReviewingTimerText>,
+            Without<ReviewingContinueText>,
+            Without<ReviewingCorrectText>,
+        ),
+    >,
     mut scores_q: Query<&mut SentenceList, With<ReviewingScoresList>>,
 ) {
     for (screen, children) in &screen_q {
@@ -247,6 +278,9 @@ fn update_reviewing_screen(
             }
             if let Ok(mut text) = correct_q.get_mut(child) {
                 text.text_this_frame = screen.correct_text();
+            }
+            if let Ok(mut text) = submitted_by_q.get_mut(child) {
+                text.text_this_frame = screen.submitted_by_text();
             }
             if let Ok(mut list) = scores_q.get_mut(child) {
                 list.sentences = screen.scores_sentences();

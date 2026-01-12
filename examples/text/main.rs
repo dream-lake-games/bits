@@ -5,13 +5,7 @@ use bits::prelude::*;
 use bits::window::get_window_plugin_with_title;
 
 fn startup(mut commands: Commands) {
-    commands.spawn((
-        Camera2d,
-        Camera {
-            clear_color: ClearColorConfig::Custom(Color::BLACK),
-            ..default()
-        },
-    ));
+    spawn_bloom_camera(&mut commands);
 
     // Large text at top (scale 2.0, letter_size = 64)
     commands.spawn((

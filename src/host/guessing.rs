@@ -65,18 +65,18 @@ impl GuessingScreen {
     }
 
     fn waiting_sentences(&self) -> Vec<String> {
-        let mut sentences = vec!["WAITING".to_string()];
+        let mut sentences = vec!["WAITING:".to_string()];
         let mut waiting = self.players_waiting.clone();
         waiting.sort();
-        sentences.extend(waiting);
+        sentences.extend(waiting.into_iter().map(|p| format!("*{}", p)));
         sentences
     }
 
     fn submitted_sentences(&self) -> Vec<String> {
-        let mut sentences = vec!["SUBMITTED".to_string()];
+        let mut sentences = vec!["SUBMITTED:".to_string()];
         let mut submitted = self.players_submitted.clone();
         submitted.sort();
-        sentences.extend(submitted);
+        sentences.extend(submitted.into_iter().map(|p| format!("*{}", p)));
         sentences
     }
 }
@@ -112,30 +112,35 @@ fn handle_guessing_screen_added(
             Visibility::Inherited,
         ));
 
-        // Timer: 800x40 area, center at y=80
+        // Timer: 256x20 area, center at y=80
         parent.spawn((
             Name::new("Timer"),
             GuessingTimerText,
-            AnimatedText::new(&screen.timer_text(), UVec2::new(256, 32), TEXT_SPEED),
+            AnimatedText::new(&screen.timer_text(), UVec2::new(256, 20), TEXT_SPEED)
+                .with_size(AnimatedTextSize::Small),
             Transform::from_xyz(0.0, 80.0, 0.0),
             Visibility::Inherited,
         ));
 
-        // Waiting list: 400x300 area, center at x=-200, y=-90
+        // Waiting list: 400x300 area, center at x=-200, y=-70
         parent.spawn((
             Name::new("WaitingList"),
             GuessingWaitingList,
-            SentenceList::new(screen.waiting_sentences()).with_text_speed(TEXT_SPEED),
-            Transform::from_xyz(-200.0, -90.0, 0.0),
+            SentenceList::new(screen.waiting_sentences())
+                .with_text_speed(TEXT_SPEED)
+                .with_size(AnimatedTextSize::Small),
+            Transform::from_xyz(-200.0, -70.0, 0.0),
             Visibility::Inherited,
         ));
 
-        // Submitted list: 400x300 area, center at x=200, y=-90
+        // Submitted list: 400x300 area, center at x=200, y=-70
         parent.spawn((
             Name::new("SubmittedList"),
             GuessingSubmittedList,
-            SentenceList::new(screen.submitted_sentences()).with_text_speed(TEXT_SPEED),
-            Transform::from_xyz(200.0, -90.0, 0.0),
+            SentenceList::new(screen.submitted_sentences())
+                .with_text_speed(TEXT_SPEED)
+                .with_size(AnimatedTextSize::Small),
+            Transform::from_xyz(200.0, -70.0, 0.0),
             Visibility::Inherited,
         ));
     });

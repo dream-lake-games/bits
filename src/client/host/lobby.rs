@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bits::bits_ui::text::Button as SpriteButton;
+use bits::bits_ui::text::AnimButton as SpriteButton;
 use bits::bits_ui::text::LETTER_SIZE;
 use bits::prelude::*;
 use bits::window::WINDOW_SIZE;
@@ -313,12 +313,13 @@ pub fn host_lobby_plugin_fn(app: &mut App) {
     // Host request sending
     app.add_systems(FixedUpdate, send_host_request);
 
-    // Host lobby player row management
+    // Host lobby player row management (stop when game starts)
     app.add_systems(
         FixedUpdate,
         (sync_player_rows, update_player_row_positions)
             .run_if(in_state(ClientRoleState::Host))
-            .run_if(in_state(ClientConnectionState::Connected)),
+            .run_if(in_state(ClientConnectionState::Connected))
+            .run_if(|game_state_q: Query<&GameState>| game_state_q.is_empty()),
     );
 }
 

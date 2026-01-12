@@ -24,11 +24,11 @@ fn main() {
             .set(get_window_plugin_with_title(&window_title))
             .set(ImagePlugin::default_nearest()),
     )
-        .add_plugins(EguiPlugin::default())
-        .add_plugins(
-            bevy_inspector_egui::quick::WorldInspectorPlugin::default()
-                .run_if(input_toggle_active(false, KeyCode::Tab)),
-        );
+    .add_plugins(EguiPlugin::default())
+    .add_plugins(
+        bevy_inspector_egui::quick::WorldInspectorPlugin::default()
+            .run_if(input_toggle_active(false, KeyCode::Tab)),
+    );
 
     app.add_plugins((
         ProtocolPlugin,

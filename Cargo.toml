@@ -64,6 +64,22 @@ path = "examples/host/betting.rs"
 name = "host_reviewing"
 path = "examples/host/reviewing.rs"
 
+[[example]]
+name = "player_waiting"
+path = "examples/player/waiting.rs"
+
+[[example]]
+name = "player_guessing"
+path = "examples/player/guessing.rs"
+
+[[example]]
+name = "player_betting"
+path = "examples/player/betting.rs"
+
+[[example]]
+name = "player_reviewing"
+path = "examples/player/reviewing.rs"
+
 [profile.dev]
 opt-level = 0
 

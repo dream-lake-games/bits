@@ -1,9 +1,9 @@
+use crate::bits_ui::anim::AnimMan;
+use crate::bits_ui::colors::Palatte;
+use crate::{ButtonAnim, LetterAnim};
 use bevy::ecs::system::BoxedSystem;
 use bevy::ecs::{lifecycle::HookContext, world::DeferredWorld};
 use bevy::prelude::*;
-use crate::{ButtonAnim, LetterAnim};
-use crate::bits_ui::anim::AnimMan;
-use crate::bits_ui::colors::Palatte;
 
 pub const BUTTON_SIZE: u32 = 64;
 
@@ -29,18 +29,19 @@ pub struct ButtonLetterAnimChild;
 
 #[derive(Component)]
 #[component(on_add = on_add_button)]
-pub struct Button {
+pub struct AnimButton {
     pub on_press: Option<BoxedSystem<(), ()>>,
     pub on_release: Option<BoxedSystem<(), ()>>,
     pub disabled_system: Option<BoxedSystem<(), bool>>,
     letter: LetterAnim,
     last_state: ButtonAnim,
-    is_disabled: bool,
-    trigger_press_this_frame: bool,
-    trigger_release_this_frame: bool,
+    /// Set to true to disable the button. Can be set directly or via `disabled_system`.
+    pub is_disabled: bool,
+    pub trigger_press_this_frame: bool,
+    pub trigger_release_this_frame: bool,
 }
 
-impl Button {
+impl AnimButton {
     pub fn new(letter: LetterAnim) -> Self {
         Self {
             on_press: None,
@@ -74,7 +75,7 @@ impl Button {
 }
 
 fn on_add_button(mut world: DeferredWorld, hook: HookContext) {
-    let button = world.get::<Button>(hook.entity).unwrap();
+    let button = world.get::<AnimButton>(hook.entity).unwrap();
     let letter = button.letter;
     let entity = hook.entity;
 
@@ -96,7 +97,7 @@ fn on_add_button(mut world: DeferredWorld, hook: HookContext) {
 fn update_button_disabled_state(world: &mut World) {
     let mut buttons_to_check = Vec::new();
     {
-        let mut query = world.query::<(Entity, &Button)>();
+        let mut query = world.query::<(Entity, &AnimButton)>();
         for (entity, button) in query.iter(world) {
             if button.disabled_system.is_some() {
                 buttons_to_check.push(entity);
@@ -106,7 +107,7 @@ fn update_button_disabled_state(world: &mut World) {
 
     for entity in buttons_to_check {
         let system_opt = world
-            .get_mut::<Button>(entity)
+            .get_mut::<AnimButton>(entity)
             .expect("Button entity should exist")
             .disabled_system
             .take();
@@ -119,17 +120,10 @@ fn update_button_disabled_state(world: &mut World) {
             disabled_system.apply_deferred(world);
 
             let mut button = world
-                .get_mut::<Button>(entity)
+                .get_mut::<AnimButton>(entity)
                 .expect("Button entity should exist");
             button.is_disabled = is_disabled;
             button.disabled_system = Some(disabled_system);
-        }
-    }
-
-    let mut query = world.query::<&mut Button>();
-    for mut button in query.iter_mut(world) {
-        if button.disabled_system.is_none() {
-            button.is_disabled = false;
         }
     }
 }
@@ -138,7 +132,7 @@ fn update_button_mouse_state(
     windows: Query<&Window>,
     camera_q: Query<(&Camera, &GlobalTransform)>,
     mouse: Res<ButtonInput<MouseButton>>,
-    mut buttons: Query<(&GlobalTransform, &mut Button, &mut AnimMan<ButtonAnim>)>,
+    mut buttons: Query<(&GlobalTransform, &mut AnimButton, &mut AnimMan<ButtonAnim>)>,
 ) {
     let Ok(window) = windows.single() else {
         return;
@@ -205,7 +199,7 @@ fn update_button_mouse_state(
 }
 
 fn update_letter_color(
-    button_query: Query<(&Button, &Children)>,
+    button_query: Query<(&AnimButton, &Children)>,
     mut letter_query: Query<&mut AnimMan<LetterAnim>, With<ButtonLetterAnimChild>>,
 ) {
     for (button, children) in button_query.iter() {
@@ -224,7 +218,7 @@ fn react_to_triggers(world: &mut World) {
     let mut release_callbacks = Vec::new();
 
     {
-        let mut query = world.query::<(Entity, &Button)>();
+        let mut query = world.query::<(Entity, &AnimButton)>();
         for (entity, button) in query.iter(world) {
             if button.trigger_press_this_frame && button.on_press.is_some() {
                 press_callbacks.push(entity);
@@ -236,7 +230,7 @@ fn react_to_triggers(world: &mut World) {
     }
 
     {
-        let mut query = world.query::<&mut Button>();
+        let mut query = world.query::<&mut AnimButton>();
         for mut button in query.iter_mut(world) {
             button.trigger_press_this_frame = false;
             button.trigger_release_this_frame = false;
@@ -245,7 +239,7 @@ fn react_to_triggers(world: &mut World) {
 
     for entity in press_callbacks {
         let system_opt = world
-            .get_mut::<Button>(entity)
+            .get_mut::<AnimButton>(entity)
             .expect("Button entity should exist")
             .on_press
             .take();
@@ -256,7 +250,7 @@ fn react_to_triggers(world: &mut World) {
             press_system.apply_deferred(world);
 
             let mut button = world
-                .get_mut::<Button>(entity)
+                .get_mut::<AnimButton>(entity)
                 .expect("Button entity should exist");
             button.on_press = Some(press_system);
         }
@@ -264,7 +258,7 @@ fn react_to_triggers(world: &mut World) {
 
     for entity in release_callbacks {
         let system_opt = world
-            .get_mut::<Button>(entity)
+            .get_mut::<AnimButton>(entity)
             .expect("Button entity should exist")
             .on_release
             .take();
@@ -275,7 +269,7 @@ fn react_to_triggers(world: &mut World) {
             release_system.apply_deferred(world);
 
             let mut button = world
-                .get_mut::<Button>(entity)
+                .get_mut::<AnimButton>(entity)
                 .expect("Button entity should exist");
             button.on_release = Some(release_system);
         }

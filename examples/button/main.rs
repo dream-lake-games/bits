@@ -1,7 +1,7 @@
 use bevy::input::common_conditions::input_toggle_active;
 use bevy::prelude::*;
 use bevy_inspector_egui::bevy_egui::EguiPlugin;
-use bits::bits_ui::text::Button as SpriteButton;
+use bits::bits_ui::text::AnimButton as SpriteButton;
 use bits::prelude::*;
 use bits::window::get_window_plugin_with_title;
 
@@ -16,13 +16,7 @@ struct PressCounter {
 struct DisableToggle(bool);
 
 fn startup(mut commands: Commands) {
-    commands.spawn((
-        Camera2d,
-        Camera {
-            clear_color: ClearColorConfig::Custom(Color::BLACK),
-            ..default()
-        },
-    ));
+    spawn_bloom_camera(&mut commands);
 
     commands.insert_resource(PressCounter::default());
     commands.insert_resource(DisableToggle(false));
@@ -99,4 +93,3 @@ fn main() {
         .add_systems(Update, toggle_disable)
         .run();
 }
-

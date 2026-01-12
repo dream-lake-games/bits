@@ -70,3 +70,42 @@ let Ok(room_info) = room_info_q.single() else {
 ### Examples
 
 Standalone game logic, rendering, or UI features should have a corresponding example in `examples/` for fast iteration. See `examples/bg/` for reference.
+
+## UI Layout
+
+The UI uses a fixed-size window with manual coordinate math for positioning. The coordinate system is centered at `(0, 0)`, with coordinates ranging from `-WINDOW_SIZE/2` to `WINDOW_SIZE/2` on each axis.
+
+### Helpful Constants
+
+When positioning UI elements, prefer using the available size constants where it makes sense:
+
+- `WINDOW_SIZE` (800) - the fixed window dimensions from `window.rs`
+- `BUTTON_SIZE` (64) - standard button size from `bits_ui`
+- `LETTER_SIZE` (32) - base letter size from `bits_ui`
+
+Common derived values (often defined locally where needed):
+
+```rust
+const HALF_WINDOW: f32 = WINDOW_SIZE as f32 / 2.0;
+const PADDING: f32 = 16.0;
+const HALF_LETTER: f32 = LETTER_SIZE as f32 / 2.0;
+```
+
+### Text Sizing
+
+Text is a bit more involved since `AnimatedText` supports different sizes (`Small`, `Medium`, `Large`) with scale factors of 0.5, 1.0, and 2.0 respectively. The effective letter size is `LETTER_SIZE * scale`. When calculating text widths, multiply the character count by the effective letter size.
+
+### Positioning Examples
+
+```rust
+// Position something at the top with padding
+let top_y = HALF_WINDOW - PADDING - element_half_height;
+
+// Center something horizontally
+let center_x = 0.0;
+
+// Position in the left half
+let left_center_x = -HALF_WINDOW / 2.0;
+```
+
+This approach keeps layouts predictable and makes it straightforward to reason about where things will appear.

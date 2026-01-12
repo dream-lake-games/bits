@@ -347,6 +347,7 @@ fn shooting_star_spawner_system(
 
             let flip_x = thread_rng().gen_bool(0.5);
             let flip_y = thread_rng().gen_bool(0.5);
+            let fps = thread_rng().gen_range(1.0..=4.0);
 
             commands.entity(entity).with_children(|parent| {
                 parent.spawn((
@@ -354,7 +355,8 @@ fn shooting_star_spawner_system(
                     AnimMan::new(variant)
                         .with_color(bloomed_color)
                         .with_flip_x(flip_x)
-                        .with_flip_y(flip_y),
+                        .with_flip_y(flip_y)
+                        .with_fps(fps),
                     Transform::from_xyz(x, y, STAR_Z),
                     Visibility::Inherited,
                 ));

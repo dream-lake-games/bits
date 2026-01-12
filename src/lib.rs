@@ -8,6 +8,7 @@ pub mod camera;
 pub mod consts;
 pub mod exa;
 pub mod host;
+pub mod player;
 pub mod protocol;
 pub mod window;
 

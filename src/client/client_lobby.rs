@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bits::bits_ui::text::Button as SpriteButton;
+use bits::bits_ui::text::AnimButton as SpriteButton;
 use bits::prelude::*;
 
 use crate::client_state::{ClientConnectionState, ClientRoleState};

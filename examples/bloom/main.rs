@@ -1,32 +1,13 @@
 use bevy::input::common_conditions::input_toggle_active;
-use bevy::post_process::bloom::{Bloom, BloomCompositeMode, BloomPrefilter};
+use bevy::post_process::bloom::{Bloom, BloomCompositeMode};
 use bevy::prelude::*;
 use bevy_inspector_egui::bevy_egui::EguiPlugin;
-use bits::bits_ui::text::Button as SpriteButton;
+use bits::bits_ui::text::AnimButton as SpriteButton;
 use bits::prelude::*;
 use bits::window::get_window_plugin_with_title;
 
 fn startup(mut commands: Commands) {
-    // Camera with HDR + Bloom enabled
-    // Neon-style settings: low intensity, tight glow, threshold at 1.0
-    commands.spawn((
-        Camera2d,
-        Camera {
-            clear_color: ClearColorConfig::Custom(Color::srgb(0.02, 0.02, 0.05)),
-            ..default()
-        },
-        Bloom {
-            intensity: 0.25,
-            low_frequency_boost: 0.3,
-            high_pass_frequency: 0.8,
-            prefilter: BloomPrefilter {
-                threshold: 1.0,
-                threshold_softness: 0.1,
-            },
-            composite_mode: BloomCompositeMode::EnergyConserving,
-            ..default()
-        },
-    ));
+    spawn_bloom_camera(&mut commands);
 
     // Standard M button
     commands.spawn((

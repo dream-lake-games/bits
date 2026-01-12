@@ -159,8 +159,10 @@ fn spawn_guess_lists(commands: &mut Commands, entity: Entity, screen: &BettingSc
             parent.spawn((
                 Name::new(format!("Guess_{}", index)),
                 BettingGuessList { index },
-                SentenceList::new(screen.guess_sentences(entry)).with_text_speed(TEXT_SPEED),
-                Transform::from_xyz(x, -110.0, 0.0),
+                SentenceList::new(screen.guess_sentences(entry))
+                    .with_text_speed(TEXT_SPEED)
+                    .with_size(AnimatedTextSize::Small),
+                Transform::from_xyz(x, -90.0, 0.0),
                 Visibility::Inherited,
             ));
         }
@@ -186,21 +188,23 @@ fn handle_betting_screen_added(
             Visibility::Inherited,
         ));
 
-        // Timer: 800x40 area, center at y=80
+        // Timer: 256x20 area, center at y=80
         parent.spawn((
             Name::new("Timer"),
             BettingTimerText,
-            AnimatedText::new(&screen.timer_text(), UVec2::new(256, 32), TEXT_SPEED),
+            AnimatedText::new(&screen.timer_text(), UVec2::new(256, 20), TEXT_SPEED)
+                .with_size(AnimatedTextSize::Small),
             Transform::from_xyz(0.0, 80.0, 0.0),
             Visibility::Inherited,
         ));
 
-        // Locked: 800x40 area, center at y=40
+        // Locked: 768x20 area, center at y=55
         parent.spawn((
             Name::new("Locked"),
             BettingLockedText,
-            AnimatedText::new(&screen.locked_text(), UVec2::new(768, 32), TEXT_SPEED),
-            Transform::from_xyz(0.0, 40.0, 0.0),
+            AnimatedText::new(&screen.locked_text(), UVec2::new(768, 20), TEXT_SPEED)
+                .with_size(AnimatedTextSize::Small),
+            Transform::from_xyz(0.0, 55.0, 0.0),
             Visibility::Inherited,
         ));
     });
