@@ -8,10 +8,24 @@ const ASEPRITE_BIN: &str = "/Applications/Aseprite.app/Contents/MacOS/aseprite";
 
 fn main() {
     let out_dir = env::var("OUT_DIR").unwrap();
+    
+    if env::var("BITS_SKIP_ANIM_GEN").is_ok() {
+        let stub = r#"pub fn register_all_anims(_app: &mut bevy::prelude::App) {}"#;
+        fs::write(Path::new(&out_dir).join("animations.rs"), stub).unwrap();
+        return;
+    }
+    
+    if let Ok(pregenerated) = fs::read_to_string("generated_animations.rs") {
+        fs::write(Path::new(&out_dir).join("animations.rs"), pregenerated).unwrap();
+        return;
+    }
+    
     let anim_defs = scan_anim_defs("anim_defs");
     let processed = process_animations(&anim_defs);
     let code = generate_code(&processed);
-    fs::write(Path::new(&out_dir).join("animations.rs"), code).unwrap();
+    
+    fs::write(Path::new(&out_dir).join("animations.rs"), &code).unwrap();
+    fs::write("generated_animations.rs", &code).unwrap();
 
     println!("cargo:rerun-if-changed=anim_defs");
     println!("cargo:rerun-if-changed=assets");

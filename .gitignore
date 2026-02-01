@@ -55,3 +55,4 @@ certs/
 # Devlog assets (videos, screenshots, etc.)
 devlog/assets/
 assets/_generated/
+generated_animations.rs

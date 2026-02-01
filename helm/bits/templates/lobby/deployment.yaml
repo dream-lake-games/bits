@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lobby
+  namespace: {{ .Values.namespace }}
+spec:
+  replicas: {{ .Values.lobby.replicas }}
+  selector:
+    matchLabels:
+      app: bits-lobby
+  template:
+    metadata:
+      labels:
+        app: bits-lobby
+    spec:
+      serviceAccountName: bits-lobby
+      containers:
+      - name: lobby
+        image: {{ .Values.lobby.image.repository }}:{{ .Values.lobby.image.tag }}
+        imagePullPolicy: {{ .Values.lobby.image.pullPolicy }}
+        ports:
+        - containerPort: 8080
+          protocol: TCP
+        env:
+        - name: NAMESPACE
+          value: {{ .Values.namespace }}
+        - name: LOBBY_URL
+          value: "http://lobby:8080"
+        - name: BITS_SERVER_IMAGE
+          value: {{ .Values.server.image.repository }}:{{ .Values.server.image.tag }}
+        - name: RUST_LOG
+          value: "info"
+

@@ -1,0 +1,16 @@
+# Don't copy these into Docker build context (speeds up builds)
+target/
+.git/
+.gitignore
+*.md
+devlog/
+blog/
+scripts/
+examples/
+helm/
+certs/
+.cursor/
+.vscode/
+*.log
+.DS_Store
+

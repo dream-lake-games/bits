@@ -1,0 +1,18 @@
+lobby:
+  image:
+    repository: bits-lobby
+    tag: v4
+    pullPolicy: Never
+  replicas: 1
+  service:
+    type: LoadBalancer
+    port: 8080
+
+server:
+  image:
+    repository: bits-server
+    tag: v4
+    pullPolicy: Never
+
+namespace: default
+

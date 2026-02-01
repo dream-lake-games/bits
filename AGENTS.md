@@ -6,6 +6,10 @@
 - Rust 2024 edition
 - Client (WASM) + headless server architecture
 
+## Commandments
+
+- NEVER run cargo clean without human approval. This shit takes way too long to build.
+
 ## Style
 
 ### Comments

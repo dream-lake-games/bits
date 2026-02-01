@@ -7,6 +7,13 @@ use lightyear::{
     netcode::NetcodeServer,
     prelude::{server::*, *},
 };
+use serde::{Deserialize, Serialize};
+
+#[derive(Resource, Clone)]
+pub struct CertHash(pub String);
+
+#[derive(Resource, Default)]
+struct Registered(bool);
 
 fn server_simple_startup(mut commands: Commands) -> Result<()> {
     let cert_path = "certs/local_cert.pem";
@@ -34,7 +41,9 @@ fn server_simple_startup(mut commands: Commands) -> Result<()> {
 
     let hash = certificate.certificate_chain().as_slice()[0].hash();
     let hash_no_colons = hash.to_string().replace(':', "");
-    println!("Certificate hash: {}", hash_no_colons);
+    info!("Certificate hash: {}", hash_no_colons);
+
+    commands.insert_resource(CertHash(hash_no_colons));
 
     let server = commands
         .spawn((
@@ -99,10 +108,69 @@ fn check_host_disconnect(
     }
 }
 
+#[derive(Serialize, Deserialize)]
+struct RegisterRequest {
+    room_code: String,
+    cert_hash: String,
+}
+
+fn register_with_lobby(
+    args: Option<Res<crate::Args>>,
+    cert_hash: Option<Res<CertHash>>,
+    started_q: Query<(), With<Started>>,
+    mut registered: ResMut<Registered>,
+) {
+    if registered.0 || started_q.is_empty() {
+        return;
+    }
+
+    let Some(args) = args else {
+        return;
+    };
+
+    let Some(cert_hash) = cert_hash else {
+        return;
+    };
+
+    let request = RegisterRequest {
+        room_code: args.room_code.clone(),
+        cert_hash: cert_hash.0.clone(),
+    };
+
+    let lobby_url = args.lobby_url.clone();
+
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let client = reqwest::Client::new();
+            match client
+                .post(format!("{}/rooms/register", lobby_url))
+                .json(&request)
+                .send()
+                .await
+            {
+                Ok(response) => {
+                    if response.status().is_success() {
+                        info!("Successfully registered with lobby");
+                    } else {
+                        warn!("Failed to register with lobby: {}", response.status());
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to register with lobby: {}", e);
+                }
+            }
+        });
+    });
+
+    registered.0 = true;
+}
+
 pub fn server_simple_plugin_fn(app: &mut App) {
     app.add_plugins(ServerPlugins::default());
+    app.init_resource::<Registered>();
     app.add_systems(Startup, server_simple_startup);
-    app.add_systems(FixedUpdate, check_host_disconnect);
+    app.add_systems(FixedUpdate, (check_host_disconnect, register_with_lobby));
 
     app.add_observer(handle_server_started);
     app.add_observer(handle_new_client);
